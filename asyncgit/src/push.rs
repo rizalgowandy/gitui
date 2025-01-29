@@ -1,10 +1,12 @@
 use crate::{
 	error::{Error, Result},
 	sync::{
-		cred::BasicAuthCredential, remotes::push::push,
-		remotes::push::ProgressNotification,
+		cred::BasicAuthCredential,
+		remotes::push::push_raw,
+		remotes::push::{ProgressNotification, PushType},
+		RepoPath,
 	},
-	AsyncGitNotification, RemoteProgress, CWD,
+	AsyncGitNotification, RemoteProgress,
 };
 use crossbeam_channel::{unbounded, Sender};
 use std::{
@@ -19,6 +21,8 @@ pub struct PushRequest {
 	pub remote: String,
 	///
 	pub branch: String,
+	///
+	pub push_type: PushType,
 	///
 	pub force: bool,
 	///
@@ -37,12 +41,17 @@ pub struct AsyncPush {
 	last_result: Arc<Mutex<Option<String>>>,
 	progress: Arc<Mutex<Option<ProgressNotification>>>,
 	sender: Sender<AsyncGitNotification>,
+	repo: RepoPath,
 }
 
 impl AsyncPush {
 	///
-	pub fn new(sender: &Sender<AsyncGitNotification>) -> Self {
+	pub fn new(
+		repo: RepoPath,
+		sender: &Sender<AsyncGitNotification>,
+	) -> Self {
 		Self {
+			repo,
 			state: Arc::new(Mutex::new(None)),
 			last_result: Arc::new(Mutex::new(None)),
 			progress: Arc::new(Mutex::new(None)),
@@ -69,7 +78,7 @@ impl AsyncPush {
 	}
 
 	///
-	pub fn request(&mut self, params: PushRequest) -> Result<()> {
+	pub fn request(&self, params: PushRequest) -> Result<()> {
 		log::trace!("request");
 
 		if self.is_pending()? {
@@ -83,6 +92,7 @@ impl AsyncPush {
 		let arc_res = Arc::clone(&self.last_result);
 		let arc_progress = Arc::clone(&self.progress);
 		let sender = self.sender.clone();
+		let repo = self.repo.clone();
 
 		thread::spawn(move || {
 			let (progress_sender, receiver) = unbounded();
@@ -94,10 +104,11 @@ impl AsyncPush {
 				arc_progress,
 			);
 
-			let res = push(
-				CWD,
+			let res = push_raw(
+				&repo,
 				params.remote.as_str(),
 				params.branch.as_str(),
+				params.push_type,
 				params.force,
 				params.delete,
 				params.basic_credential.clone(),
@@ -151,7 +162,7 @@ impl AsyncPush {
 		let mut last_res = arc_result.lock()?;
 
 		*last_res = match res {
-			Ok(_) => None,
+			Ok(()) => None,
 			Err(e) => {
 				log::error!("push error: {}", e);
 				Some(e.to_string())

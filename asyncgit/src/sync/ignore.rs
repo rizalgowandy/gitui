@@ -1,5 +1,8 @@
-use super::utils::{repo, work_dir};
-use crate::error::{Error, Result};
+use super::{utils::work_dir, RepoPath};
+use crate::{
+	error::{Error, Result},
+	sync::repository::repo,
+};
 use scopetime::scope_time;
 use std::{
 	fs::{File, OpenOptions},
@@ -11,7 +14,7 @@ static GITIGNORE: &str = ".gitignore";
 
 /// add file or path to root ignore file
 pub fn add_to_ignore(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	path_to_ignore: &str,
 ) -> Result<()> {
 	scope_time!("add_to_ignore");
@@ -71,9 +74,10 @@ mod tests {
 		let file_path = Path::new("foo.txt");
 		let (_td, repo) = repo_init()?;
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"test")?;
+		File::create(root.join(file_path))?.write_all(b"test")?;
 
 		assert_eq!(root.join(ignore_file_path).exists(), false);
 		add_to_ignore(repo_path, file_path.to_str().unwrap())?;
@@ -98,16 +102,17 @@ mod tests {
 		let file_path = Path::new("foo.txt");
 		let (_td, repo) = repo_init()?;
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"test")?;
-		File::create(&root.join(ignore_file_path))?
+		File::create(root.join(file_path))?.write_all(b"test")?;
+		File::create(root.join(ignore_file_path))?
 			.write_all(b"foo\n")?;
 
 		add_to_ignore(repo_path, file_path.to_str().unwrap())?;
 
 		let mut lines =
-			read_lines(&root.join(ignore_file_path)).unwrap();
+			read_lines(root.join(ignore_file_path)).unwrap();
 		assert_eq!(&lines.nth(1).unwrap().unwrap(), "foo.txt");
 
 		Ok(())
@@ -119,16 +124,17 @@ mod tests {
 		let file_path = Path::new("foo.txt");
 		let (_td, repo) = repo_init()?;
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"test")?;
-		File::create(&root.join(ignore_file_path))?
+		File::create(root.join(file_path))?.write_all(b"test")?;
+		File::create(root.join(ignore_file_path))?
 			.write_all(b"foo")?;
 
 		add_to_ignore(repo_path, file_path.to_str().unwrap())?;
 
 		let mut lines =
-			read_lines(&root.join(ignore_file_path)).unwrap();
+			read_lines(root.join(ignore_file_path)).unwrap();
 		assert_eq!(&lines.nth(1).unwrap().unwrap(), "foo.txt");
 
 		Ok(())
@@ -139,14 +145,15 @@ mod tests {
 		let ignore_file_path = Path::new(".gitignore");
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		repo_write_file(&repo, ".gitignore", "#foo").unwrap();
 
 		let res = add_to_ignore(repo_path, ".gitignore");
 		assert!(res.is_err());
 
-		let lines = read_lines(&root.join(ignore_file_path)).unwrap();
+		let lines = read_lines(root.join(ignore_file_path)).unwrap();
 		assert_eq!(lines.count(), 1);
 	}
 }

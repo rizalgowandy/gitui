@@ -2,7 +2,7 @@ use crate::{
 	error::Result, filetreeitems::FileTreeItems,
 	tree_iter::TreeIterator, TreeItemInfo,
 };
-use std::{collections::BTreeSet, path::Path, usize};
+use std::{collections::BTreeSet, path::Path};
 
 ///
 #[derive(Copy, Clone, Debug)]
@@ -51,6 +51,11 @@ impl FileTree {
 	///
 	pub const fn is_empty(&self) -> bool {
 		self.items.file_count() == 0
+	}
+
+	///
+	pub const fn selection(&self) -> Option<usize> {
+		self.selection
 	}
 
 	///
@@ -109,7 +114,7 @@ impl FileTree {
 
 	///
 	pub fn move_selection(&mut self, dir: MoveSelection) -> bool {
-		self.selection.map_or(false, |selection| {
+		self.selection.is_some_and(|selection| {
 			let new_index = match dir {
 				MoveSelection::Up => {
 					self.selection_updown(selection, true)
@@ -131,7 +136,7 @@ impl FileTree {
 			};
 
 			let changed_index =
-				new_index.map(|i| i != selection).unwrap_or_default();
+				new_index.is_some_and(|i| i != selection);
 
 			if changed_index {
 				self.selection = new_index;
@@ -270,10 +275,7 @@ impl FileTree {
 		}
 	}
 
-	fn select_parent(
-		&mut self,
-		current_index: usize,
-	) -> Option<usize> {
+	fn select_parent(&self, current_index: usize) -> Option<usize> {
 		let indent =
 			self.items.tree_items[current_index].info().indent();
 
@@ -330,8 +332,7 @@ impl FileTree {
 		self.items
 			.tree_items
 			.get(index)
-			.map(|item| item.info().is_visible())
-			.unwrap_or_default()
+			.is_some_and(|item| item.info().is_visible())
 	}
 }
 

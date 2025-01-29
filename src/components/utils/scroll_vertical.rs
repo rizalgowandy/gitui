@@ -1,11 +1,9 @@
-use std::cell::Cell;
-
-use tui::{backend::Backend, layout::Rect, Frame};
-
 use crate::{
 	components::ScrollType,
-	ui::{draw_scrollbar, style::SharedTheme},
+	ui::{draw_scrollbar, style::SharedTheme, Orientation},
 };
+use ratatui::{layout::Rect, Frame};
+use std::cell::Cell;
 
 pub struct VerticalScroll {
 	top: Cell<usize>,
@@ -51,6 +49,32 @@ impl VerticalScroll {
 		true
 	}
 
+	pub fn move_area_to_visible(
+		&self,
+		height: usize,
+		start: usize,
+		end: usize,
+	) {
+		let top = self.top.get();
+		let bottom = top + height;
+		let max_top = self.max_top.get();
+		// the top of some content is hidden
+		if start < top {
+			self.top.set(start);
+			return;
+		}
+		// the bottom of some content is hidden and there is visible space available
+		if end > bottom && start > top {
+			let avail_space = start.saturating_sub(top);
+			let diff = std::cmp::min(
+				avail_space,
+				end.saturating_sub(bottom),
+			);
+			let top = top.saturating_add(diff);
+			self.top.set(std::cmp::min(max_top, top));
+		}
+	}
+
 	pub fn update(
 		&self,
 		selection: usize,
@@ -83,18 +107,14 @@ impl VerticalScroll {
 		self.update(self.get_top(), line_count, visual_height)
 	}
 
-	pub fn draw<B: Backend>(
-		&self,
-		f: &mut Frame<B>,
-		r: Rect,
-		theme: &SharedTheme,
-	) {
+	pub fn draw(&self, f: &mut Frame, r: Rect, theme: &SharedTheme) {
 		draw_scrollbar(
 			f,
 			r,
 			theme,
 			self.max_top.get(),
 			self.top.get(),
+			Orientation::Vertical,
 		);
 	}
 }
@@ -134,5 +154,42 @@ mod tests {
 	#[test]
 	fn test_scroll_zero_height() {
 		assert_eq!(calc_scroll_top(4, 0, 4, 3), 0);
+	}
+
+	#[test]
+	fn test_scroll_bottom_into_view() {
+		let visual_height = 10;
+		let line_count = 20;
+		let scroll = VerticalScroll::new();
+		scroll.max_top.set(line_count - visual_height);
+
+		// intersecting with the bottom of the visible area
+		scroll.move_area_to_visible(visual_height, 9, 11);
+		assert_eq!(scroll.get_top(), 1);
+
+		// completely below the visible area
+		scroll.move_area_to_visible(visual_height, 15, 17);
+		assert_eq!(scroll.get_top(), 7);
+
+		// scrolling to the bottom overflow
+		scroll.move_area_to_visible(visual_height, 30, 40);
+		assert_eq!(scroll.get_top(), 10);
+	}
+
+	#[test]
+	fn test_scroll_top_into_view() {
+		let visual_height = 10;
+		let line_count = 20;
+		let scroll = VerticalScroll::new();
+		scroll.max_top.set(line_count - visual_height);
+		scroll.top.set(4);
+
+		// intersecting with the top of the visible area
+		scroll.move_area_to_visible(visual_height, 2, 8);
+		assert_eq!(scroll.get_top(), 2);
+
+		// completely above the visible area
+		scroll.move_area_to_visible(visual_height, 0, 2);
+		assert_eq!(scroll.get_top(), 0);
 	}
 }

@@ -3,16 +3,16 @@
 use crate::{
 	error::Error,
 	error::Result,
-	sync::{config::untracked_files_config_repo, utils},
+	sync::{config::untracked_files_config_repo, repository::repo},
 };
 use git2::{Delta, Status, StatusOptions, StatusShow};
 use scopetime::scope_time;
 use std::path::Path;
 
-use super::ShowUntrackedFilesConfig;
+use super::{RepoPath, ShowUntrackedFilesConfig};
 
 ///
-#[derive(Copy, Clone, Hash, PartialEq, Debug)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, Debug)]
 pub enum StatusItemType {
 	///
 	New,
@@ -59,7 +59,7 @@ impl From<Delta> for StatusItemType {
 }
 
 ///
-#[derive(Clone, Hash, PartialEq, Debug)]
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct StatusItem {
 	///
 	pub path: String,
@@ -68,7 +68,7 @@ pub struct StatusItem {
 }
 
 ///
-#[derive(Copy, Clone, Hash, PartialEq, Debug)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, Debug)]
 pub enum StatusType {
 	///
 	WorkingDir,
@@ -94,15 +94,51 @@ impl From<StatusType> for StatusShow {
 	}
 }
 
-/// gurantees sorting
+///
+pub fn is_workdir_clean(
+	repo_path: &RepoPath,
+	show_untracked: Option<ShowUntrackedFilesConfig>,
+) -> Result<bool> {
+	let repo = repo(repo_path)?;
+
+	if repo.is_bare() && !repo.is_worktree() {
+		return Ok(true);
+	}
+
+	let show_untracked = if let Some(config) = show_untracked {
+		config
+	} else {
+		untracked_files_config_repo(&repo)?
+	};
+
+	let mut options = StatusOptions::default();
+	options
+		.show(StatusShow::Workdir)
+		.update_index(true)
+		.include_untracked(show_untracked.include_untracked())
+		.renames_head_to_index(true)
+		.recurse_untracked_dirs(
+			show_untracked.recurse_untracked_dirs(),
+		);
+
+	let statuses = repo.statuses(Some(&mut options))?;
+
+	Ok(statuses.is_empty())
+}
+
+/// guarantees sorting
 pub fn get_status(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	status_type: StatusType,
 	show_untracked: Option<ShowUntrackedFilesConfig>,
 ) -> Result<Vec<StatusItem>> {
 	scope_time!("get_status");
 
-	let repo = utils::repo(repo_path)?;
+	let repo = repo(repo_path)?;
+
+	if repo.is_bare() && !repo.is_worktree() {
+		return Ok(Vec::new());
+	}
 
 	let show_untracked = if let Some(config) = show_untracked {
 		config

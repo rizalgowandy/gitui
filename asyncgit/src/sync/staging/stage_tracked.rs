@@ -3,7 +3,8 @@ use crate::{
 	error::{Error, Result},
 	sync::{
 		diff::DiffLinePosition,
-		patches::get_file_diff_patch_and_hunklines, utils::repo,
+		patches::get_file_diff_patch_and_hunklines, repository::repo,
+		RepoPath,
 	},
 };
 use easy_cast::Conv;
@@ -12,7 +13,7 @@ use std::path::Path;
 
 ///
 pub fn stage_lines(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	file_path: &str,
 	is_stage: bool,
 	lines: &[DiffLinePosition],
@@ -50,7 +51,7 @@ pub fn stage_lines(
 	let blob_id = repo.blob(new_content.as_bytes())?;
 
 	idx.id = blob_id;
-	idx.file_size = u32::try_conv(new_content.as_bytes().len())?;
+	idx.file_size = u32::try_conv(new_content.len())?;
 	index.add(&idx)?;
 
 	index.write()?;
@@ -80,7 +81,7 @@ mod test {
 ";
 
 		let (path, repo) = repo_init().unwrap();
-		let path = path.path().to_str().unwrap();
+		let path: &RepoPath = &path.path().to_str().unwrap().into();
 
 		write_commit_file(&repo, "test.txt", FILE_1, "c1");
 
@@ -113,7 +114,7 @@ b = 3
 c = 4";
 
 		let (path, repo) = repo_init().unwrap();
-		let path = path.path().to_str().unwrap();
+		let path: &RepoPath = &path.path().to_str().unwrap().into();
 
 		write_commit_file(&repo, "test.txt", FILE_1, "c1");
 
@@ -154,7 +155,7 @@ c = 4";
 ";
 
 		let (path, repo) = repo_init().unwrap();
-		let path = path.path().to_str().unwrap();
+		let path: &RepoPath = &path.path().to_str().unwrap().into();
 
 		write_commit_file(&repo, "test.txt", FILE_1, "c1");
 
@@ -162,7 +163,7 @@ c = 4";
 
 		assert_eq!(get_statuses(path), (1, 0));
 
-		stage_add_file(path, &Path::new("test.txt")).unwrap();
+		stage_add_file(path, Path::new("test.txt")).unwrap();
 
 		assert_eq!(get_statuses(path), (0, 1));
 

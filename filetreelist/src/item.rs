@@ -1,8 +1,5 @@
 use crate::error::Result;
-use std::{
-	convert::TryFrom,
-	path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 /// holds the information shared among all `FileTreeItem` in a `FileTree`
 #[derive(Debug, Clone)]
@@ -83,11 +80,11 @@ impl TreeItemInfo {
 }
 
 /// attribute used to indicate the collapse/expand state of a path item
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub struct PathCollapsed(pub bool);
 
 /// `FileTreeItem` can be of two kinds
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum FileTreeItemKind {
 	Path(PathCollapsed),
 	File,
@@ -202,7 +199,7 @@ impl PartialOrd for FileTreeItem {
 		&self,
 		other: &Self,
 	) -> Option<std::cmp::Ordering> {
-		self.info.full_path.partial_cmp(&other.info.full_path)
+		Some(self.cmp(other))
 	}
 }
 

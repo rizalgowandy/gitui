@@ -1,6 +1,6 @@
+use crate::string_utils::trim_offset;
 use easy_cast::Cast;
-use tui::text::StyledGrapheme;
-use unicode_segmentation::UnicodeSegmentation;
+use ratatui::text::StyledGrapheme;
 use unicode_width::UnicodeWidthStr;
 
 const NBSP: &str = "\u{00a0}";
@@ -27,8 +27,8 @@ impl<'a, 'b> WordWrapper<'a, 'b> {
 		symbols: &'b mut dyn Iterator<Item = StyledGrapheme<'a>>,
 		max_line_width: u16,
 		trim: bool,
-	) -> WordWrapper<'a, 'b> {
-		WordWrapper {
+	) -> Self {
+		Self {
 			symbols,
 			max_line_width,
 			current_line: vec![],
@@ -38,7 +38,7 @@ impl<'a, 'b> WordWrapper<'a, 'b> {
 	}
 }
 
-impl<'a, 'b> LineComposer<'a> for WordWrapper<'a, 'b> {
+impl<'a> LineComposer<'a> for WordWrapper<'a, '_> {
 	fn next_line(&mut self) -> Option<(&[StyledGrapheme<'a>], u16)> {
 		if self.max_line_width == 0 {
 			return None;
@@ -144,7 +144,7 @@ pub struct LineTruncator<'a, 'b> {
 	symbols: &'b mut dyn Iterator<Item = StyledGrapheme<'a>>,
 	max_line_width: u16,
 	current_line: Vec<StyledGrapheme<'a>>,
-	/// Record the offet to skip render
+	/// Record the offset to skip render
 	horizontal_offset: u16,
 }
 
@@ -152,8 +152,8 @@ impl<'a, 'b> LineTruncator<'a, 'b> {
 	pub fn new(
 		symbols: &'b mut dyn Iterator<Item = StyledGrapheme<'a>>,
 		max_line_width: u16,
-	) -> LineTruncator<'a, 'b> {
-		LineTruncator {
+	) -> Self {
+		Self {
 			symbols,
 			max_line_width,
 			horizontal_offset: 0,
@@ -166,7 +166,7 @@ impl<'a, 'b> LineTruncator<'a, 'b> {
 	}
 }
 
-impl<'a, 'b> LineComposer<'a> for LineTruncator<'a, 'b> {
+impl<'a> LineComposer<'a> for LineTruncator<'a, '_> {
 	fn next_line(&mut self) -> Option<(&[StyledGrapheme<'a>], u16)> {
 		if self.max_line_width == 0 {
 			return None;
@@ -231,22 +231,6 @@ impl<'a, 'b> LineComposer<'a> for LineTruncator<'a, 'b> {
 			Some((&self.current_line[..], current_line_width))
 		}
 	}
-}
-
-/// This function will return a str slice which start at specified offset.
-/// As src is a unicode str, start offset has to be calculated with each character.
-fn trim_offset(src: &str, mut offset: usize) -> &str {
-	let mut start = 0;
-	for c in UnicodeSegmentation::graphemes(src, true) {
-		let w = c.width();
-		if w <= offset {
-			offset -= w;
-			start += c.len();
-		} else {
-			break;
-		}
-	}
-	&src[start..]
 }
 
 #[cfg(test)]
@@ -442,7 +426,7 @@ mod test {
 		assert_eq!(line_truncator, vec!["", "a"]);
 	}
 
-	/// Tests WordWrapper with words some of which exceed line length and some not.
+	/// Tests `WordWrapper` with words some of which exceed line length and some not.
 	#[test]
 	fn line_composer_word_wrapper_mixed_length() {
 		let width = 20;
@@ -461,7 +445,7 @@ mod test {
 				"mnopab cdefghi j",
 				"klmno",
 			]
-		)
+		);
 	}
 
 	#[test]
@@ -471,11 +455,11 @@ mod test {
                     では、";
 		let (word_wrapper, word_wrapper_width) = run_composer(
 			Composer::WordWrapper { trim: true },
-			&text,
+			text,
 			width,
 		);
 		let (line_truncator, _) =
-			run_composer(Composer::LineTruncator, &text, width);
+			run_composer(Composer::LineTruncator, text, width);
 		assert_eq!(line_truncator, vec!["コンピュータ上で文字"]);
 		let wrapped = vec![
 			"コンピュータ上で文字",
@@ -525,7 +509,7 @@ mod test {
 		assert_eq!(line_truncator, vec!["                    "]);
 	}
 
-	/// Tests an input starting with a letter, folowed by spaces - some of the behaviour is
+	/// Tests an input starting with a letter, followed by spaces - some of the behaviour is
 	/// incidental.
 	#[test]
 	fn line_composer_char_plus_lots_of_spaces() {
@@ -592,7 +576,7 @@ mod test {
 		);
 
 		// Ensure that if the character was a regular space, it would be wrapped differently.
-		let text_space = text.replace("\u{00a0}", " ");
+		let text_space = text.replace('\u{00a0}', " ");
 		let (word_wrapper_space, _) = run_composer(
 			Composer::WordWrapper { trim: true },
 			&text_space,

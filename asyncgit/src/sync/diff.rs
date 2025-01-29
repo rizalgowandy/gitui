@@ -1,20 +1,28 @@
 //! sync git api for fetching a diff
 
 use super::{
-	commit_files::{get_commit_diff, get_compare_commits_diff},
-	utils::{self, get_head_repo, work_dir},
-	CommitId,
+	commit_files::{
+		get_commit_diff, get_compare_commits_diff, OldNew,
+	},
+	utils::{get_head_repo, work_dir},
+	CommitId, RepoPath,
 };
-use crate::{error::Error, error::Result, hash};
+use crate::{
+	error::Error,
+	error::Result,
+	hash,
+	sync::{get_stashes, repository::repo},
+};
 use easy_cast::Conv;
 use git2::{
 	Delta, Diff, DiffDelta, DiffFormat, DiffHunk, Patch, Repository,
 };
 use scopetime::scope_time;
+use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, fs, path::Path, rc::Rc};
 
 /// type of diff of a single line
-#[derive(Copy, Clone, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum DiffLineType {
 	/// just surrounding line, no change
 	None,
@@ -125,7 +133,9 @@ pub struct FileDiff {
 }
 
 /// see <https://libgit2.org/libgit2/#HEAD/type/git_diff_options>
-#[derive(Debug, Hash, Clone, Copy, PartialEq)]
+#[derive(
+	Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
+)]
 pub struct DiffOptions {
 	/// see <https://libgit2.org/libgit2/#HEAD/type/git_diff_options>
 	pub ignore_whitespace: bool,
@@ -192,14 +202,14 @@ pub(crate) fn get_diff_raw<'a>(
 
 /// returns diff of a specific file either in `stage` or workdir
 pub fn get_diff(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	p: &str,
 	stage: bool,
 	options: Option<DiffOptions>,
 ) -> Result<FileDiff> {
 	scope_time!("get_diff");
 
-	let repo = utils::repo(repo_path)?;
+	let repo = repo(repo_path)?;
 	let work_dir = work_dir(&repo)?;
 	let diff = get_diff_raw(&repo, p, stage, false, options)?;
 
@@ -209,31 +219,39 @@ pub fn get_diff(
 /// returns diff of a specific file inside a commit
 /// see `get_commit_diff`
 pub fn get_diff_commit(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	id: CommitId,
 	p: String,
+	options: Option<DiffOptions>,
 ) -> Result<FileDiff> {
 	scope_time!("get_diff_commit");
 
-	let repo = utils::repo(repo_path)?;
+	let repo = repo(repo_path)?;
 	let work_dir = work_dir(&repo)?;
-	let diff = get_commit_diff(&repo, id, Some(p))?;
+	let diff = get_commit_diff(
+		&repo,
+		id,
+		Some(p),
+		options,
+		Some(&get_stashes(repo_path)?.into_iter().collect()),
+	)?;
 
 	raw_diff_to_file_diff(&diff, work_dir)
 }
 
 /// get file changes of a diff between two commits
 pub fn get_diff_commits(
-	repo_path: &str,
-	ids: (CommitId, CommitId),
+	repo_path: &RepoPath,
+	ids: OldNew<CommitId>,
 	p: String,
+	options: Option<DiffOptions>,
 ) -> Result<FileDiff> {
 	scope_time!("get_diff_commits");
 
-	let repo = utils::repo(repo_path)?;
+	let repo = repo(repo_path)?;
 	let work_dir = work_dir(&repo)?;
 	let diff =
-		get_compare_commits_diff(&repo, (ids.0, ids.1), Some(p))?;
+		get_compare_commits_diff(&repo, ids, Some(p), options)?;
 
 	raw_diff_to_file_diff(&diff, work_dir)
 }
@@ -241,8 +259,8 @@ pub fn get_diff_commits(
 ///
 //TODO: refactor into helper type with the inline closures as dedicated functions
 #[allow(clippy::too_many_lines)]
-fn raw_diff_to_file_diff<'a>(
-	diff: &'a Diff,
+fn raw_diff_to_file_diff(
+	diff: &Diff,
 	work_dir: &Path,
 ) -> Result<FileDiff> {
 	let res = Rc::new(RefCell::new(FileDiff::default()));
@@ -403,11 +421,14 @@ fn new_file_content(path: &Path) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
 	use super::{get_diff, get_diff_commit};
-	use crate::error::Result;
-	use crate::sync::{
-		commit, stage_add_file,
-		status::{get_status, StatusType},
-		tests::{get_statuses, repo_init, repo_init_empty},
+	use crate::{
+		error::Result,
+		sync::{
+			commit, stage_add_file,
+			status::{get_status, StatusType},
+			tests::{get_statuses, repo_init, repo_init_empty},
+			RepoPath,
+		},
 	};
 	use std::{
 		fs::{self, File},
@@ -419,12 +440,13 @@ mod tests {
 	fn test_untracked_subfolder() {
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		assert_eq!(get_statuses(repo_path), (0, 0));
 
-		fs::create_dir(&root.join("foo")).unwrap();
-		File::create(&root.join("foo/bar.txt"))
+		fs::create_dir(root.join("foo")).unwrap();
+		File::create(root.join("foo/bar.txt"))
 			.unwrap()
 			.write_all(b"test\nfoo")
 			.unwrap();
@@ -443,11 +465,12 @@ mod tests {
 		let file_path = Path::new("foo.txt");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		assert_eq!(get_statuses(repo_path), (0, 0));
 
-		File::create(&root.join(file_path))
+		File::create(root.join(file_path))
 			.unwrap()
 			.write_all(b"test\nfoo")
 			.unwrap();
@@ -499,7 +522,8 @@ mod tests {
 	fn test_hunks() {
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		assert_eq!(get_statuses(repo_path), (0, 0));
 
@@ -533,7 +557,7 @@ mod tests {
 		let res =
 			get_diff(repo_path, "bar.txt", false, None).unwrap();
 
-		assert_eq!(res.hunks.len(), 2)
+		assert_eq!(res.hunks.len(), 2);
 	}
 
 	#[test]
@@ -545,13 +569,13 @@ mod tests {
 		let sub_path = root.join("foo/");
 
 		fs::create_dir_all(&sub_path).unwrap();
-		File::create(&root.join(file_path))
+		File::create(root.join(file_path))
 			.unwrap()
 			.write_all(b"test")
 			.unwrap();
 
 		let diff = get_diff(
-			sub_path.to_str().unwrap(),
+			&sub_path.to_str().unwrap().into(),
 			file_path.to_str().unwrap(),
 			false,
 			None,
@@ -566,16 +590,16 @@ mod tests {
 		let file_path = Path::new("bar");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"\x00")?;
+		File::create(root.join(file_path))?.write_all(b"\x00")?;
 
 		stage_add_file(repo_path, file_path).unwrap();
 
 		commit(repo_path, "commit").unwrap();
 
-		File::create(&root.join(file_path))?
-			.write_all(b"\x00\x02")?;
+		File::create(root.join(file_path))?.write_all(b"\x00\x02")?;
 
 		let diff = get_diff(
 			repo_path,
@@ -597,10 +621,10 @@ mod tests {
 		let file_path = Path::new("bar");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?
-			.write_all(b"\x00\xc7")?;
+		File::create(root.join(file_path))?.write_all(b"\x00\xc7")?;
 
 		let diff = get_diff(
 			repo_path,
@@ -622,23 +646,24 @@ mod tests {
 		let file_path = Path::new("bar");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"\x00")?;
+		File::create(root.join(file_path))?.write_all(b"\x00")?;
 
 		stage_add_file(repo_path, file_path).unwrap();
 
 		commit(repo_path, "").unwrap();
 
-		File::create(&root.join(file_path))?
-			.write_all(b"\x00\x02")?;
+		File::create(root.join(file_path))?.write_all(b"\x00\x02")?;
 
 		stage_add_file(repo_path, file_path).unwrap();
 
 		let id = commit(repo_path, "").unwrap();
 
 		let diff =
-			get_diff_commit(repo_path, id, String::new()).unwrap();
+			get_diff_commit(repo_path, id, String::new(), None)
+				.unwrap();
 
 		dbg!(&diff);
 		assert_eq!(diff.sizes, (1, 2));

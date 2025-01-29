@@ -1,38 +1,34 @@
-use super::CommitId;
+#![allow(dead_code)]
+use super::{CommitId, SharedCommitFilterFn};
 use crate::error::Result;
 use git2::{Commit, Oid, Repository};
+use gix::revision::Walk;
 use std::{
 	cmp::Ordering,
 	collections::{BinaryHeap, HashSet},
-	sync::Arc,
 };
 
 struct TimeOrderedCommit<'a>(Commit<'a>);
 
-impl<'a> Eq for TimeOrderedCommit<'a> {}
+impl Eq for TimeOrderedCommit<'_> {}
 
-impl<'a> PartialEq for TimeOrderedCommit<'a> {
+impl PartialEq for TimeOrderedCommit<'_> {
 	fn eq(&self, other: &Self) -> bool {
 		self.0.time().eq(&other.0.time())
 	}
 }
 
-impl<'a> PartialOrd for TimeOrderedCommit<'a> {
+impl PartialOrd for TimeOrderedCommit<'_> {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		self.0.time().partial_cmp(&other.0.time())
+		Some(self.cmp(other))
 	}
 }
 
-impl<'a> Ord for TimeOrderedCommit<'a> {
+impl Ord for TimeOrderedCommit<'_> {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.0.time().cmp(&other.0.time())
 	}
 }
-
-///
-pub type LogWalkerFilter = Arc<
-	Box<dyn Fn(&Repository, &CommitId) -> Result<bool> + Send + Sync>,
->;
 
 ///
 pub struct LogWalker<'a> {
@@ -40,7 +36,7 @@ pub struct LogWalker<'a> {
 	visited: HashSet<Oid>,
 	limit: usize,
 	repo: &'a Repository,
-	filter: Option<LogWalkerFilter>,
+	filter: Option<SharedCommitFilterFn>,
 }
 
 impl<'a> LogWalker<'a> {
@@ -61,7 +57,16 @@ impl<'a> LogWalker<'a> {
 	}
 
 	///
-	pub fn filter(self, filter: Option<LogWalkerFilter>) -> Self {
+	pub fn visited(&self) -> usize {
+		self.visited.len()
+	}
+
+	///
+	#[must_use]
+	pub fn filter(
+		self,
+		filter: Option<SharedCommitFilterFn>,
+	) -> Self {
 		Self { filter, ..self }
 	}
 
@@ -97,10 +102,81 @@ impl<'a> LogWalker<'a> {
 
 	//
 	fn visit(&mut self, c: Commit<'a>) {
-		if !self.visited.contains(&c.id()) {
-			self.visited.insert(c.id());
+		if self.visited.insert(c.id()) {
 			self.commits.push(TimeOrderedCommit(c));
 		}
+	}
+}
+
+/// This is separate from `LogWalker` because filtering currently (June 2024) works through
+/// `SharedCommitFilterFn`.
+///
+/// `SharedCommitFilterFn` requires access to a `git2::repo::Repository` because, under the hood,
+/// it calls into functions that work with a `git2::repo::Repository`. It seems unwise to open a
+/// repo both through `gix::discover` and `Repository::open_ext` at the same time, so there is a
+/// separate struct that works with `gix::Repository` only.
+///
+/// A more long-term option is to refactor filtering to work with a `gix::Repository` and to remove
+/// `LogWalker` once this is done, but this is a larger effort.
+pub struct LogWalkerWithoutFilter<'a> {
+	walk: Walk<'a>,
+	limit: usize,
+	visited: usize,
+}
+
+impl<'a> LogWalkerWithoutFilter<'a> {
+	///
+	pub fn new(
+		repo: &'a mut gix::Repository,
+		limit: usize,
+	) -> Result<Self> {
+		// This seems to be an object cache size that yields optimal performance. There’s no specific
+		// reason this is 2^14, so benchmarking might reveal that there’s better values.
+		repo.object_cache_size_if_unset(2_usize.pow(14));
+
+		let commit = repo.head()?.peel_to_commit_in_place()?;
+
+		let tips = [commit.id];
+
+		let platform = repo
+			.rev_walk(tips)
+			.sorting(gix::revision::walk::Sorting::ByCommitTime(gix::traverse::commit::simple::CommitTimeOrder::NewestFirst))
+			.use_commit_graph(false);
+
+		let walk = platform.all()?;
+
+		Ok(Self {
+			walk,
+			limit,
+			visited: 0,
+		})
+	}
+
+	///
+	pub const fn visited(&self) -> usize {
+		self.visited
+	}
+
+	///
+	pub fn read(&mut self, out: &mut Vec<CommitId>) -> Result<usize> {
+		let mut count = 0_usize;
+
+		while let Some(Ok(info)) = self.walk.next() {
+			let bytes = info.id.as_bytes();
+			let commit_id: CommitId = Oid::from_bytes(bytes)?.into();
+
+			out.push(commit_id);
+
+			count += 1;
+
+			if count == self.limit {
+				break;
+			}
+		}
+
+		self.visited += count;
+
+		Ok(count)
 	}
 }
 
@@ -108,9 +184,15 @@ impl<'a> LogWalker<'a> {
 mod tests {
 	use super::*;
 	use crate::error::Result;
+	use crate::sync::commit_filter::{SearchFields, SearchOptions};
+	use crate::sync::tests::write_commit_file;
 	use crate::sync::{
-		commit, commit_files::get_commit_diff, get_commits_info,
-		stage_add_file, tests::repo_init_empty,
+		commit, get_commits_info, stage_add_file,
+		tests::repo_init_empty,
+	};
+	use crate::sync::{
+		diff_contains_file, filter_commit_by_search, LogFilterSearch,
+		LogFilterSearchOptions, RepoPath,
 	};
 	use pretty_assertions::assert_eq;
 	use std::{fs::File, io::Write, path::Path};
@@ -120,12 +202,13 @@ mod tests {
 		let file_path = Path::new("foo");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		commit(repo_path, "commit1").unwrap();
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		let oid2 = commit(repo_path, "commit2").unwrap();
 
@@ -134,7 +217,7 @@ mod tests {
 		walk.read(&mut items).unwrap();
 
 		assert_eq!(items.len(), 1);
-		assert_eq!(items[0], oid2.into());
+		assert_eq!(items[0], oid2);
 
 		Ok(())
 	}
@@ -144,12 +227,13 @@ mod tests {
 		let file_path = Path::new("foo");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		commit(repo_path, "commit1").unwrap();
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		let oid2 = commit(repo_path, "commit2").unwrap();
 
@@ -161,10 +245,47 @@ mod tests {
 		dbg!(&info);
 
 		assert_eq!(items.len(), 2);
-		assert_eq!(items[0], oid2.into());
+		assert_eq!(items[0], oid2);
 
 		let mut items = Vec::new();
 		walk.read(&mut items).unwrap();
+
+		assert_eq!(items.len(), 0);
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_logwalker_without_filter() -> Result<()> {
+		let file_path = Path::new("foo");
+		let (_td, repo) = repo_init_empty().unwrap();
+		let root = repo.path().parent().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
+
+		File::create(root.join(file_path))?.write_all(b"a")?;
+		stage_add_file(repo_path, file_path).unwrap();
+		commit(repo_path, "commit1").unwrap();
+		File::create(root.join(file_path))?.write_all(b"a")?;
+		stage_add_file(repo_path, file_path).unwrap();
+		let oid2 = commit(repo_path, "commit2").unwrap();
+
+		let mut repo: gix::Repository =
+				gix::ThreadSafeRepository::discover_with_environment_overrides(repo_path.gitpath())
+						.map(Into::into)
+						.unwrap();
+		let mut walk = LogWalkerWithoutFilter::new(&mut repo, 100)?;
+		let mut items = Vec::new();
+		assert!(matches!(walk.read(&mut items), Ok(2)));
+
+		let info = get_commits_info(repo_path, &items, 50).unwrap();
+		dbg!(&info);
+
+		assert_eq!(items.len(), 2);
+		assert_eq!(items[0], oid2);
+
+		let mut items = Vec::new();
+		assert!(matches!(walk.read(&mut items), Ok(0)));
 
 		assert_eq!(items.len(), 0);
 
@@ -177,72 +298,95 @@ mod tests {
 		let second_file_path = Path::new("baz");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: RepoPath =
+			root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
-		stage_add_file(repo_path, file_path).unwrap();
+		File::create(root.join(file_path))?.write_all(b"a")?;
+		stage_add_file(&repo_path, file_path).unwrap();
 
-		let _first_commit_id = commit(repo_path, "commit1").unwrap();
+		let _first_commit_id = commit(&repo_path, "commit1").unwrap();
 
-		File::create(&root.join(second_file_path))?
-			.write_all(b"a")?;
-		stage_add_file(repo_path, second_file_path).unwrap();
+		File::create(root.join(second_file_path))?.write_all(b"a")?;
+		stage_add_file(&repo_path, second_file_path).unwrap();
 
-		let second_commit_id = commit(repo_path, "commit2").unwrap();
+		let second_commit_id = commit(&repo_path, "commit2").unwrap();
 
-		File::create(&root.join(file_path))?.write_all(b"b")?;
-		stage_add_file(repo_path, file_path).unwrap();
+		File::create(root.join(file_path))?.write_all(b"b")?;
+		stage_add_file(&repo_path, file_path).unwrap();
 
-		let _third_commit_id = commit(repo_path, "commit3").unwrap();
+		let _third_commit_id = commit(&repo_path, "commit3").unwrap();
 
-		let diff_contains_baz = |repo: &Repository,
-		                         commit_id: &CommitId|
-		 -> Result<bool> {
-			let diff = get_commit_diff(
-				&repo,
-				*commit_id,
-				Some("baz".into()),
-			)?;
-
-			let contains_file = diff.deltas().len() > 0;
-
-			Ok(contains_file)
-		};
+		let diff_contains_baz = diff_contains_file("baz".into());
 
 		let mut items = Vec::new();
 		let mut walker = LogWalker::new(&repo, 100)?
-			.filter(Some(Arc::new(Box::new(diff_contains_baz))));
+			.filter(Some(diff_contains_baz));
 		walker.read(&mut items).unwrap();
 
 		assert_eq!(items.len(), 1);
-		assert_eq!(items[0], second_commit_id.into());
+		assert_eq!(items[0], second_commit_id);
 
 		let mut items = Vec::new();
 		walker.read(&mut items).unwrap();
 
 		assert_eq!(items.len(), 0);
 
-		let diff_contains_bar = |repo: &Repository,
-		                         commit_id: &CommitId|
-		 -> Result<bool> {
-			let diff = get_commit_diff(
-				&repo,
-				*commit_id,
-				Some("bar".into()),
-			)?;
-
-			let contains_file = diff.deltas().len() > 0;
-
-			Ok(contains_file)
-		};
+		let diff_contains_bar = diff_contains_file("bar".into());
 
 		let mut items = Vec::new();
 		let mut walker = LogWalker::new(&repo, 100)?
-			.filter(Some(Arc::new(Box::new(diff_contains_bar))));
+			.filter(Some(diff_contains_bar));
 		walker.read(&mut items).unwrap();
 
 		assert_eq!(items.len(), 0);
 
 		Ok(())
+	}
+
+	#[test]
+	fn test_logwalker_with_filter_search() {
+		let (_td, repo) = repo_init_empty().unwrap();
+
+		write_commit_file(&repo, "foo", "a", "commit1");
+		let second_commit_id = write_commit_file(
+			&repo,
+			"baz",
+			"a",
+			"my commit msg (#2)",
+		);
+		write_commit_file(&repo, "foo", "b", "commit3");
+
+		let log_filter = filter_commit_by_search(
+			LogFilterSearch::new(LogFilterSearchOptions {
+				fields: SearchFields::MESSAGE_SUMMARY,
+				options: SearchOptions::FUZZY_SEARCH,
+				search_pattern: String::from("my msg"),
+			}),
+		);
+
+		let mut items = Vec::new();
+		let mut walker = LogWalker::new(&repo, 100)
+			.unwrap()
+			.filter(Some(log_filter));
+		walker.read(&mut items).unwrap();
+
+		assert_eq!(items.len(), 1);
+		assert_eq!(items[0], second_commit_id);
+
+		let log_filter = filter_commit_by_search(
+			LogFilterSearch::new(LogFilterSearchOptions {
+				fields: SearchFields::FILENAMES,
+				options: SearchOptions::FUZZY_SEARCH,
+				search_pattern: String::from("fo"),
+			}),
+		);
+
+		let mut items = Vec::new();
+		let mut walker = LogWalker::new(&repo, 100)
+			.unwrap()
+			.filter(Some(log_filter));
+		walker.read(&mut items).unwrap();
+
+		assert_eq!(items.len(), 2);
 	}
 }

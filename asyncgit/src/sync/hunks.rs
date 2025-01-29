@@ -1,29 +1,31 @@
 use super::{
-	diff::{get_diff_raw, HunkHeader},
-	utils::repo,
+	diff::{get_diff_raw, DiffOptions, HunkHeader},
+	RepoPath,
 };
 use crate::{
 	error::{Error, Result},
 	hash,
+	sync::repository::repo,
 };
 use git2::{ApplyLocation, ApplyOptions, Diff};
 use scopetime::scope_time;
 
 ///
 pub fn stage_hunk(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	file_path: &str,
 	hunk_hash: u64,
+	options: Option<DiffOptions>,
 ) -> Result<()> {
 	scope_time!("stage_hunk");
 
 	let repo = repo(repo_path)?;
 
-	let diff = get_diff_raw(&repo, file_path, false, false, None)?;
+	let diff = get_diff_raw(&repo, file_path, false, false, options)?;
 
 	let mut opt = ApplyOptions::new();
 	opt.hunk_callback(|hunk| {
-		hunk.map_or(false, |hunk| {
+		hunk.is_some_and(|hunk| {
 			let header = HunkHeader::from(hunk);
 			hash(&header) == hunk_hash
 		})
@@ -36,15 +38,16 @@ pub fn stage_hunk(
 
 /// this will fail for an all untracked file
 pub fn reset_hunk(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	file_path: &str,
 	hunk_hash: u64,
+	options: Option<DiffOptions>,
 ) -> Result<()> {
 	scope_time!("reset_hunk");
 
 	let repo = repo(repo_path)?;
 
-	let diff = get_diff_raw(&repo, file_path, false, false, None)?;
+	let diff = get_diff_raw(&repo, file_path, false, false, options)?;
 
 	let hunk_index = find_hunk_index(&diff, hunk_hash);
 	if let Some(hunk_index) = hunk_index {
@@ -94,15 +97,16 @@ fn find_hunk_index(diff: &Diff, hunk_hash: u64) -> Option<usize> {
 
 ///
 pub fn unstage_hunk(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	file_path: &str,
 	hunk_hash: u64,
+	options: Option<DiffOptions>,
 ) -> Result<bool> {
 	scope_time!("revert_hunk");
 
 	let repo = repo(repo_path)?;
 
-	let diff = get_diff_raw(&repo, file_path, true, false, None)?;
+	let diff = get_diff_raw(&repo, file_path, true, false, options)?;
 	let diff_count_positive = diff.deltas().len();
 
 	let hunk_index = find_hunk_index(&diff, hunk_hash);
@@ -111,7 +115,7 @@ pub fn unstage_hunk(
 		Ok,
 	)?;
 
-	let diff = get_diff_raw(&repo, file_path, true, true, None)?;
+	let diff = get_diff_raw(&repo, file_path, true, true, options)?;
 
 	if diff.deltas().len() != diff_count_positive {
 		return Err(Error::Generic(format!(
@@ -162,15 +166,16 @@ mod tests {
 		let file_path = Path::new("foo/foo.txt");
 		let (_td, repo) = repo_init_empty()?;
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
-
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 		let sub_path = root.join("foo/");
 
 		fs::create_dir_all(&sub_path)?;
-		File::create(&root.join(file_path))?.write_all(b"test")?;
+		File::create(root.join(file_path))?.write_all(b"test")?;
 
+		let sub_path: &RepoPath = &sub_path.to_str().unwrap().into();
 		let diff = get_diff(
-			sub_path.to_str().unwrap(),
+			sub_path,
 			file_path.to_str().unwrap(),
 			false,
 			None,
@@ -180,6 +185,7 @@ mod tests {
 			repo_path,
 			file_path.to_str().unwrap(),
 			diff.hunks[0].header_hash,
+			None,
 		)
 		.is_err());
 

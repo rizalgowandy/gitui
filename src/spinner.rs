@@ -1,5 +1,8 @@
+use ratatui::{
+	backend::{Backend, CrosstermBackend},
+	Terminal,
+};
 use std::{cell::Cell, char, io};
-use tui::{backend::Backend, Terminal};
 
 // static SPINNER_CHARS: &[char] = &['◢', '◣', '◤', '◥'];
 // static SPINNER_CHARS: &[char] = &['⢹', '⢺', '⢼', '⣸', '⣇', '⡧', '⡗', '⡏'];
@@ -36,9 +39,9 @@ impl Spinner {
 	}
 
 	/// draws or removes spinner char depending on `pending` state
-	pub fn draw<B: Backend>(
+	pub fn draw(
 		&self,
-		terminal: &mut Terminal<B>,
+		terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 	) -> io::Result<()> {
 		let idx = self.idx;
 
@@ -48,7 +51,7 @@ impl Spinner {
 		if self.last_char.get() != char_to_draw {
 			self.last_char.set(char_to_draw);
 
-			let c = tui::buffer::Cell::default()
+			let c = ratatui::buffer::Cell::default()
 				.set_char(char_to_draw)
 				.clone();
 
@@ -56,7 +59,7 @@ impl Spinner {
 				.backend_mut()
 				.draw(vec![(0_u16, 0_u16, &c)].into_iter())?;
 
-			tui::backend::Backend::flush(terminal.backend_mut())?;
+			Backend::flush(terminal.backend_mut())?;
 		}
 
 		Ok(())

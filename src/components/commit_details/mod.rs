@@ -4,23 +4,23 @@ mod style;
 
 use super::{
 	command_pump, event_pump, CommandBlocking, CommandInfo,
-	Component, DrawableComponent, EventState, FileTreeComponent,
+	Component, DrawableComponent, EventState, StatusTreeComponent,
 };
 use crate::{
-	accessors, keys::SharedKeyConfig, queue::Queue, strings,
-	ui::style::SharedTheme,
+	accessors,
+	app::Environment,
+	keys::{key_match, SharedKeyConfig},
+	strings,
 };
 use anyhow::Result;
 use asyncgit::{
-	sync::CommitTags, AsyncCommitFiles, AsyncGitNotification,
-	CommitFilesParams,
+	sync::{commit_files::OldNew, CommitTags},
+	AsyncCommitFiles, CommitFilesParams,
 };
 use compare_details::CompareDetailsComponent;
-use crossbeam_channel::Sender;
 use crossterm::event::Event;
 use details::DetailsComponent;
-use tui::{
-	backend::Backend,
+use ratatui::{
 	layout::{Constraint, Direction, Layout, Rect},
 	Frame,
 };
@@ -29,7 +29,7 @@ pub struct CommitDetailsComponent {
 	commit: Option<CommitFilesParams>,
 	single_details: DetailsComponent,
 	compare_details: CompareDetailsComponent,
-	file_tree: FileTreeComponent,
+	file_tree: StatusTreeComponent,
 	git_commit_files: AsyncCommitFiles,
 	visible: bool,
 	key_config: SharedKeyConfig,
@@ -39,33 +39,18 @@ impl CommitDetailsComponent {
 	accessors!(self, [single_details, compare_details, file_tree]);
 
 	///
-	pub fn new(
-		queue: &Queue,
-		sender: &Sender<AsyncGitNotification>,
-		theme: SharedTheme,
-		key_config: SharedKeyConfig,
-	) -> Self {
+	pub fn new(env: &Environment) -> Self {
 		Self {
-			single_details: DetailsComponent::new(
-				theme.clone(),
-				key_config.clone(),
-				false,
+			single_details: DetailsComponent::new(env, false),
+			compare_details: CompareDetailsComponent::new(env, false),
+			git_commit_files: AsyncCommitFiles::new(
+				env.repo.borrow().clone(),
+				&env.sender_git,
 			),
-			compare_details: CompareDetailsComponent::new(
-				theme.clone(),
-				false,
-			),
-			git_commit_files: AsyncCommitFiles::new(sender),
-			file_tree: FileTreeComponent::new(
-				"",
-				false,
-				Some(queue.clone()),
-				theme,
-				key_config.clone(),
-			),
+			file_tree: StatusTreeComponent::new(env, "", false),
 			visible: false,
 			commit: None,
-			key_config,
+			key_config: env.key_config.clone(),
 		}
 	}
 
@@ -83,7 +68,7 @@ impl CommitDetailsComponent {
 	pub fn set_commits(
 		&mut self,
 		params: Option<CommitFilesParams>,
-		tags: Option<CommitTags>,
+		tags: Option<&CommitTags>,
 	) -> Result<()> {
 		if params.is_none() {
 			self.single_details.set_commit(None, None);
@@ -93,11 +78,16 @@ impl CommitDetailsComponent {
 		self.commit = params;
 
 		if let Some(id) = params {
+			self.file_tree.set_commit(Some(id.id));
+
 			if let Some(other) = id.other {
-				self.compare_details
-					.set_commits(Some((id.id, other)));
+				self.compare_details.set_commits(Some(OldNew {
+					new: id.id,
+					old: other,
+				}));
 			} else {
-				self.single_details.set_commit(Some(id.id), tags);
+				self.single_details
+					.set_commit(Some(id.id), tags.cloned());
 			}
 
 			if let Some((fetched_id, res)) =
@@ -126,7 +116,7 @@ impl CommitDetailsComponent {
 	}
 
 	///
-	pub const fn files(&self) -> &FileTreeComponent {
+	pub const fn files(&self) -> &StatusTreeComponent {
 		&self.file_tree
 	}
 
@@ -144,16 +134,16 @@ impl CommitDetailsComponent {
 	}
 
 	fn is_compare(&self) -> bool {
-		self.commit.map(|p| p.other.is_some()).unwrap_or_default()
+		self.commit.is_some_and(|p| p.other.is_some())
 	}
 }
 
 impl DrawableComponent for CommitDetailsComponent {
-	fn draw<B: Backend>(
-		&self,
-		f: &mut Frame<B>,
-		rect: Rect,
-	) -> Result<()> {
+	fn draw(&self, f: &mut Frame, rect: Rect) -> Result<()> {
+		if !self.visible {
+			return Ok(());
+		}
+
 		let constraints = if self.is_compare() {
 			[Constraint::Length(10), Constraint::Min(0)]
 		} else {
@@ -205,22 +195,26 @@ impl Component for CommitDetailsComponent {
 		CommandBlocking::PassingOn
 	}
 
-	fn event(&mut self, ev: Event) -> Result<EventState> {
+	fn event(&mut self, ev: &Event) -> Result<EventState> {
 		if event_pump(ev, self.components_mut().as_mut_slice())?
 			.is_consumed()
 		{
+			if !self.file_tree.is_visible() {
+				self.hide();
+			}
+
 			return Ok(EventState::Consumed);
 		}
 
 		if self.focused() {
 			if let Event::Key(e) = ev {
-				return if e == self.key_config.keys.focus_below
+				return if key_match(e, self.key_config.keys.move_down)
 					&& self.details_focused()
 				{
 					self.set_details_focus(false);
 					self.file_tree.focus(true);
 					Ok(EventState::Consumed)
-				} else if e == self.key_config.keys.focus_above
+				} else if key_match(e, self.key_config.keys.move_up)
 					&& self.file_tree.focused()
 					&& !self.is_compare()
 				{
@@ -244,6 +238,7 @@ impl Component for CommitDetailsComponent {
 	}
 	fn show(&mut self) -> Result<()> {
 		self.visible = true;
+		self.file_tree.show()?;
 		Ok(())
 	}
 

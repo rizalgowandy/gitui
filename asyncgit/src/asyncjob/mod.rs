@@ -7,16 +7,21 @@ use crossbeam_channel::Sender;
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Passed to `AsyncJob::run` allowing sending intermediate progress notifications
-pub struct RunParams<T: Copy + Send, P: Clone + Send + Sync> {
+pub struct RunParams<
+	T: Copy + Send,
+	P: Clone + Send + Sync + PartialEq,
+> {
 	sender: Sender<T>,
 	progress: Arc<RwLock<P>>,
 }
 
-impl<T: Copy + Send, P: Clone + Send + Sync> RunParams<T, P> {
+impl<T: Copy + Send, P: Clone + Send + Sync + PartialEq>
+	RunParams<T, P>
+{
 	/// send an intermediate update notification.
 	/// do not confuse this with the return value of `run`.
 	/// `send` should only be used about progress notifications
-	/// and not for the final notifcation indicating the end of the async job.
+	/// and not for the final notification indicating the end of the async job.
 	/// see `run` for more info
 	pub fn send(&self, notification: T) -> Result<()> {
 		self.sender.send(notification)?;
@@ -24,9 +29,13 @@ impl<T: Copy + Send, P: Clone + Send + Sync> RunParams<T, P> {
 	}
 
 	/// set the current progress
-	pub fn set_progress(&self, p: P) -> Result<()> {
-		*(self.progress.write()?) = p;
-		Ok(())
+	pub fn set_progress(&self, p: P) -> Result<bool> {
+		Ok(if *self.progress.read()? == p {
+			false
+		} else {
+			*(self.progress.write()?) = p;
+			true
+		})
 	}
 }
 
@@ -35,7 +44,7 @@ pub trait AsyncJob: Send + Sync + Clone {
 	/// defines what notification type is used to communicate outside
 	type Notification: Copy + Send;
 	/// type of progress
-	type Progress: Clone + Default + Send + Sync;
+	type Progress: Clone + Default + Send + Sync + PartialEq;
 
 	/// can run a synchronous time intensive task.
 	/// the returned notification is used to tell interested parties
@@ -83,7 +92,7 @@ impl<J: 'static + AsyncJob> AsyncSingleJob<J> {
 	}
 
 	/// makes sure `next` is cleared and returns `true` if it actually canceled something
-	pub fn cancel(&mut self) -> bool {
+	pub fn cancel(&self) -> bool {
 		if let Ok(mut next) = self.next.lock() {
 			if next.is_some() {
 				*next = None;
@@ -96,17 +105,13 @@ impl<J: 'static + AsyncJob> AsyncSingleJob<J> {
 
 	/// take out last finished job
 	pub fn take_last(&self) -> Option<J> {
-		if let Ok(mut last) = self.last.lock() {
-			last.take()
-		} else {
-			None
-		}
+		self.last.lock().map_or(None, |mut last| last.take())
 	}
 
 	/// spawns `task` if nothing is running currently,
 	/// otherwise schedules as `next` overwriting if `next` was set before.
 	/// return `true` if the new task gets started right away.
-	pub fn spawn(&mut self, task: J) -> bool {
+	pub fn spawn(&self, task: J) -> bool {
 		self.schedule_next(task);
 		self.check_for_job()
 	}
@@ -157,18 +162,14 @@ impl<J: 'static + AsyncJob> AsyncSingleJob<J> {
 		Ok(())
 	}
 
-	fn schedule_next(&mut self, task: J) {
+	fn schedule_next(&self, task: J) {
 		if let Ok(mut next) = self.next.lock() {
 			*next = Some(task);
 		}
 	}
 
 	fn take_next(&self) -> Option<J> {
-		if let Ok(mut next) = self.next.lock() {
-			next.take()
-		} else {
-			None
-		}
+		self.next.lock().map_or(None, |mut next| next.take())
 	}
 }
 
@@ -190,10 +191,10 @@ mod test {
 		value_to_add: u32,
 	}
 
-	type TestNotificaton = ();
+	type TestNotification = ();
 
 	impl AsyncJob for TestJob {
-		type Notification = TestNotificaton;
+		type Notification = TestNotification;
 		type Progress = ();
 
 		fn run(
@@ -215,7 +216,7 @@ mod test {
 			let res =
 				self.v.fetch_add(self.value_to_add, Ordering::SeqCst);
 
-			println!("[job] value: {}", res);
+			println!("[job] value: {res}");
 
 			Ok(())
 		}
@@ -225,7 +226,7 @@ mod test {
 	fn test_overwrite() {
 		let (sender, receiver) = unbounded();
 
-		let mut job: AsyncSingleJob<TestJob> =
+		let job: AsyncSingleJob<TestJob> =
 			AsyncSingleJob::new(sender);
 
 		let task = TestJob {
@@ -244,8 +245,8 @@ mod test {
 		}
 
 		println!("recv");
-		let _foo = receiver.recv().unwrap();
-		let _foo = receiver.recv().unwrap();
+		receiver.recv().unwrap();
+		receiver.recv().unwrap();
 		assert!(receiver.is_empty());
 
 		assert_eq!(
@@ -264,7 +265,7 @@ mod test {
 	fn test_cancel() {
 		let (sender, receiver) = unbounded();
 
-		let mut job: AsyncSingleJob<TestJob> =
+		let job: AsyncSingleJob<TestJob> =
 			AsyncSingleJob::new(sender);
 
 		let task = TestJob {
@@ -290,7 +291,7 @@ mod test {
 		wait_for_job(&job);
 
 		println!("recv");
-		let _foo = receiver.recv().unwrap();
+		receiver.recv().unwrap();
 		println!("received");
 
 		assert_eq!(

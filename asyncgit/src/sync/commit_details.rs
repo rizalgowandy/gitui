@@ -1,10 +1,10 @@
-use super::{commits_info::get_message, utils::repo, CommitId};
-use crate::error::Result;
+use super::{commits_info::get_message, CommitId, RepoPath};
+use crate::{error::Result, sync::repository::repo};
 use git2::Signature;
 use scopetime::scope_time;
 
 ///
-#[derive(Debug, PartialEq, Default, Clone)]
+#[derive(Debug, PartialEq, Eq, Default, Clone)]
 pub struct CommitSignature {
 	///
 	pub name: String,
@@ -60,7 +60,7 @@ impl CommitMessage {
 	///
 	pub fn combine(self) -> String {
 		if let Some(body) = self.body {
-			format!("{}\n{}", self.subject, body)
+			format!("{}\n{body}", self.subject)
 		} else {
 			self.subject
 		}
@@ -89,7 +89,7 @@ impl CommitDetails {
 
 ///
 pub fn get_commit_details(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	id: CommitId,
 ) -> Result<CommitDetails> {
 	scope_time!("get_commit_details");
@@ -121,11 +121,12 @@ pub fn get_commit_details(
 
 #[cfg(test)]
 mod tests {
-
 	use super::{get_commit_details, CommitMessage};
-	use crate::error::Result;
-	use crate::sync::{
-		commit, stage_add_file, tests::repo_init_empty,
+	use crate::{
+		error::Result,
+		sync::{
+			commit, stage_add_file, tests::repo_init_empty, RepoPath,
+		},
 	};
 	use std::{fs::File, io::Write, path::Path};
 
@@ -134,9 +135,10 @@ mod tests {
 		let file_path = Path::new("foo");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 
 		let msg = invalidstring::invalid_utf8("test msg");
@@ -144,15 +146,12 @@ mod tests {
 
 		let res = get_commit_details(repo_path, id).unwrap();
 
-		dbg!(&res.message.as_ref().unwrap().subject);
-		assert_eq!(
-			res.message
-				.as_ref()
-				.unwrap()
-				.subject
-				.starts_with("test msg"),
-			true
-		);
+		assert!(res
+			.message
+			.as_ref()
+			.unwrap()
+			.subject
+			.starts_with("test msg"));
 
 		Ok(())
 	}
