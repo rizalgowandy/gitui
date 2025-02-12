@@ -1,8 +1,11 @@
 use crate::{
 	error::Result,
 	hash,
-	sync::{self, diff::DiffOptions, CommitId},
-	AsyncGitNotification, FileDiff, CWD,
+	sync::{
+		self, commit_files::OldNew, diff::DiffOptions, CommitId,
+		RepoPath,
+	},
+	AsyncGitNotification, FileDiff,
 };
 use crossbeam_channel::Sender;
 use std::{
@@ -14,10 +17,10 @@ use std::{
 };
 
 ///
-#[derive(Debug, Hash, Clone, PartialEq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub enum DiffType {
 	/// diff two commits
-	Commits((CommitId, CommitId)),
+	Commits(OldNew<CommitId>),
 	/// diff in a given commit
 	Commit(CommitId),
 	/// diff against staged file
@@ -27,7 +30,7 @@ pub enum DiffType {
 }
 
 ///
-#[derive(Debug, Hash, Clone, PartialEq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct DiffParams {
 	/// path to the file to diff
 	pub path: String,
@@ -51,12 +54,17 @@ pub struct AsyncDiff {
 	last: Arc<Mutex<Option<LastResult<DiffParams, FileDiff>>>>,
 	sender: Sender<AsyncGitNotification>,
 	pending: Arc<AtomicUsize>,
+	repo: RepoPath,
 }
 
 impl AsyncDiff {
 	///
-	pub fn new(sender: &Sender<AsyncGitNotification>) -> Self {
+	pub fn new(
+		repo: RepoPath,
+		sender: &Sender<AsyncGitNotification>,
+	) -> Self {
 		Self {
+			repo,
 			current: Arc::new(Mutex::new(Request(0, None))),
 			last: Arc::new(Mutex::new(None)),
 			sender: sender.clone(),
@@ -65,14 +73,14 @@ impl AsyncDiff {
 	}
 
 	///
-	pub fn last(&mut self) -> Result<Option<(DiffParams, FileDiff)>> {
+	pub fn last(&self) -> Result<Option<(DiffParams, FileDiff)>> {
 		let last = self.last.lock()?;
 
 		Ok(last.clone().map(|res| (res.params, res.result)))
 	}
 
 	///
-	pub fn refresh(&mut self) -> Result<()> {
+	pub fn refresh(&self) -> Result<()> {
 		if let Ok(Some(param)) = self.get_last_param() {
 			self.clear_current()?;
 			self.request(param)?;
@@ -87,7 +95,7 @@ impl AsyncDiff {
 
 	///
 	pub fn request(
-		&mut self,
+		&self,
 		params: DiffParams,
 	) -> Result<Option<FileDiff>> {
 		log::trace!("request {:?}", params);
@@ -109,11 +117,13 @@ impl AsyncDiff {
 		let arc_last = Arc::clone(&self.last);
 		let sender = self.sender.clone();
 		let arc_pending = Arc::clone(&self.pending);
+		let repo = self.repo.clone();
 
 		self.pending.fetch_add(1, Ordering::Relaxed);
 
 		rayon_core::spawn(move || {
 			let notify = Self::get_diff_helper(
+				&repo,
 				params,
 				&arc_last,
 				&arc_current,
@@ -143,6 +153,7 @@ impl AsyncDiff {
 	}
 
 	fn get_diff_helper(
+		repo_path: &RepoPath,
 		params: DiffParams,
 		arc_last: &Arc<
 			Mutex<Option<LastResult<DiffParams, FileDiff>>>,
@@ -152,26 +163,28 @@ impl AsyncDiff {
 	) -> Result<bool> {
 		let res = match params.diff_type {
 			DiffType::Stage => sync::diff::get_diff(
-				CWD,
+				repo_path,
 				&params.path,
 				true,
 				Some(params.options),
 			)?,
 			DiffType::WorkDir => sync::diff::get_diff(
-				CWD,
+				repo_path,
 				&params.path,
 				false,
 				Some(params.options),
 			)?,
 			DiffType::Commit(id) => sync::diff::get_diff_commit(
-				CWD,
+				repo_path,
 				id,
 				params.path.clone(),
+				Some(params.options),
 			)?,
 			DiffType::Commits(ids) => sync::diff::get_diff_commits(
-				CWD,
+				repo_path,
 				ids,
 				params.path.clone(),
+				Some(params.options),
 			)?,
 		};
 
@@ -199,7 +212,7 @@ impl AsyncDiff {
 		Ok(self.last.lock()?.clone().map(|e| e.params))
 	}
 
-	fn clear_current(&mut self) -> Result<()> {
+	fn clear_current(&self) -> Result<()> {
 		let mut current = self.current.lock()?;
 		current.0 = 0;
 		current.1 = None;

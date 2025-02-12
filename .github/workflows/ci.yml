@@ -2,7 +2,7 @@ name: CI
 
 on:
   schedule:
-    - cron: '0 2 * * *' # run at 2 AM UTC
+    - cron: '0 2 * * *'
   push:
     branches: [ '*' ]
   pull_request:
@@ -17,42 +17,32 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [nightly, stable, '1.50']
+        rust: [nightly, stable, '1.70']
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.rust == 'nightly' }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Restore cargo cache
-      uses: actions/cache@v2
+      uses: Swatinem/rust-cache@v2
       env:
         cache-name: ci
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ~/.cargo/bin
-          target
-        key: ${{ matrix.os }}-${{ env.cache-name }}-${{ matrix.rust }}-${{ hashFiles('Cargo.lock') }}
+        shared-key: ${{ matrix.os }}-${{ env.cache-name }}-${{ matrix.rust }}
 
     - name: MacOS Workaround
       if: matrix.os == 'macos-latest'
       run: cargo clean -p serde_derive -p thiserror
 
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
-        default: true
-        profile: minimal
         components: clippy
 
-    - name: New Resolver
-      if: matrix.rust != '1.50'
-      run: |
-        cargo install cargo-modify --force
-        cargo modify new-resolver
+    - name: Rustup Show
+      run: rustup show
 
     - name: Build Debug
       run: |
@@ -68,11 +58,14 @@ jobs:
     - name: Build Release
       run: make build-release
 
+    - name: Test Install
+      run: cargo install --path "." --force --locked
+
     - name: Binary Size (unix)
       if: matrix.os != 'windows-latest'
       run: |
         ls -l ./target/release/gitui
-    
+
     - name: Binary Size (win)
       if: matrix.os == 'windows-latest'
       run: |
@@ -86,33 +79,38 @@ jobs:
     - name: Build MSI (windows)
       if: matrix.os == 'windows-latest'
       run: |
-        cargo install cargo-wix
-        cargo wix --no-build --nocapture --output ./target/wix/gitui.msi
-        ls -l ./target/wix/gitui.msi
+        cargo install cargo-wix --version 0.3.3
+        cargo wix --version
+        cargo wix -p gitui --no-build --nocapture --output ./target/wix/gitui-win.msi
+        ls -l ./target/wix/gitui-win.msi
 
   build-linux-musl:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        rust: [nightly, stable, '1.50']
+        rust: [nightly, stable, '1.70']
     continue-on-error: ${{ matrix.rust == 'nightly' }}
     steps:
-    - uses: actions/checkout@master
+    - uses: actions/checkout@v4
+
+    - name: Restore cargo cache
+      uses: Swatinem/rust-cache@v2
+      env:
+        cache-name: ci
+      with:
+        key: ubuntu-latest-${{ env.cache-name }}-${{ matrix.rust }}
+
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust }}
-        profile: minimal
-        default: true
-        target: x86_64-unknown-linux-musl
+        targets: x86_64-unknown-linux-musl
 
-    # TODO: remove once we depend on 1.51 as a msrv and resolver is supported by default
-    - name: New Resolver
-      if: matrix.rust != '1.50'
-      run: |
-        cargo install cargo-modify --force
-        cargo modify new-resolver
+    # The build would fail without manually installing the target.
+    # https://github.com/dtolnay/rust-toolchain/issues/83
+    - name: Manually install target
+      run: rustup target add x86_64-unknown-linux-musl
 
     - name: Setup MUSL
       run: |
@@ -129,43 +127,151 @@ jobs:
     - name: Test
       run: |
         make test-linux-musl
+    - name: Test Install
+      run: cargo install --path "." --force --locked
 
-  rustfmt:
-    name: Rustfmt
+  build-linux-arm:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [nightly, stable, '1.70']
+    continue-on-error: ${{ matrix.rust == 'nightly' }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore cargo cache
+      uses: Swatinem/rust-cache@v2
+      env:
+        cache-name: ci
+      with:
+        key: ubuntu-latest-${{ env.cache-name }}-${{ matrix.rust }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+    - name: Setup ARM toolchain
+      run: |
+        rustup target add aarch64-unknown-linux-gnu
+        rustup target add armv7-unknown-linux-gnueabihf
+        rustup target add arm-unknown-linux-gnueabihf
+
+        curl -o $GITHUB_WORKSPACE/aarch64.tar.xz https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/8.2-2018.08/gcc-arm-8.2-2018.08-x86_64-aarch64-linux-gnu.tar.xz
+        curl -o $GITHUB_WORKSPACE/arm.tar.xz https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/8.2-2018.08/gcc-arm-8.2-2018.08-x86_64-arm-linux-gnueabihf.tar.xz
+
+        tar xf $GITHUB_WORKSPACE/aarch64.tar.xz
+        tar xf $GITHUB_WORKSPACE/arm.tar.xz
+
+        echo "$GITHUB_WORKSPACE/gcc-arm-8.2-2018.08-x86_64-aarch64-linux-gnu/bin" >> $GITHUB_PATH
+        echo "$GITHUB_WORKSPACE/gcc-arm-8.2-2018.08-x86_64-arm-linux-gnueabihf/bin" >> $GITHUB_PATH
+
+    - name: Build Debug
+      run: |
+        make build-linux-arm-debug
+    - name: Build Release
+      run: |
+        make build-linux-arm-release
+        ls -l ./target/aarch64-unknown-linux-gnu/release/gitui || ls -l ./target/armv7-unknown-linux-gnueabihf/release/gitui || ls -l ./target/arm-unknown-linux-gnueabihf/release/gitui
+
+  build-apple-x86:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [nightly, stable, '1.70']
+    continue-on-error: ${{ matrix.rust == 'nightly' }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore cargo cache
+      uses: Swatinem/rust-cache@v2
+      env:
+        cache-name: ci
+      with:
+        key: apple-x86-${{ env.cache-name }}-${{ matrix.rust }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+    - name: Setup target
+      run: rustup target add x86_64-apple-darwin
+
+    - name: Build Debug
+      run: |
+        make build-apple-x86-debug
+    - name: Build Release
+      run: |
+        make build-apple-x86-release
+        ls -l ./target/x86_64-apple-darwin/release/gitui
+
+  linting:
+    name: Lints
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@master
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
+    - uses: actions/checkout@v4
+
+    - name: Restore cargo cache
+      uses: Swatinem/rust-cache@v2
+      env:
+        cache-name: ci
       with:
-        toolchain: stable
+        key: ubuntu-latest-${{ env.cache-name }}-stable
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
         components: rustfmt
+
     - run: cargo fmt -- --check
 
-  # TODO: enable again once we have these two fixed:
-  #  https://github.com/extrawurst/gitui/issues/950
-  #  https://github.com/extrawurst/gitui/issues/951
-  #
-  # sec:
-  #   name: Security audit
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #   - uses: actions/checkout@v2
-  #   - uses: actions-rs/audit-check@v1
-  #     with:
-  #       token: ${{ secrets.GITHUB_TOKEN }}
+    - name: cargo-sort
+      run: |
+        cargo install cargo-sort --force
+        cargo sort -c -w
+
+    - name: cargo-deny install
+      run: |
+        cargo install --locked cargo-deny
+
+    - name: cargo-deny checks
+      run: |
+        cargo deny check
+
+  udeps:
+    name: udeps
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore cargo cache
+      uses: Swatinem/rust-cache@v2
+      env:
+        cache-name: ci
+      with:
+        key: ubuntu-latest-${{ env.cache-name }}-nightly
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@nightly
+
+    - name: build cargo-udeps
+      run: cargo install --git https://github.com/est31/cargo-udeps --locked
+
+    - name: run cargo-udeps
+      run: cargo +nightly udeps --all-targets
 
   log-test:
     name: Changelog Test
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@master
+    - uses: actions/checkout@v4
     - name: Extract release notes
       id: extract_release_notes
-      uses: ffurrer2/extract-release-notes@v1
+      uses: ffurrer2/extract-release-notes@v2
       with:
         release_notes_file: ./release-notes.txt
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: release-notes.txt
         path: ./release-notes.txt

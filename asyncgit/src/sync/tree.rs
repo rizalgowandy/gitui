@@ -1,7 +1,7 @@
-use super::CommitId;
+use super::{CommitId, RepoPath};
 use crate::{
 	error::{Error, Result},
-	sync::utils::repo,
+	sync::repository::repo,
 };
 use git2::{Oid, Repository, Tree};
 use scopetime::scope_time;
@@ -11,7 +11,7 @@ use std::{
 };
 
 /// `tree_files` returns a list of `FileTree`
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TreeFile {
 	/// path of this file
 	pub path: PathBuf,
@@ -23,7 +23,7 @@ pub struct TreeFile {
 
 /// guarantees sorting the result
 pub fn tree_files(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	commit: CommitId,
 ) -> Result<Vec<TreeFile>> {
 	scope_time!("tree_files");
@@ -42,14 +42,14 @@ pub fn tree_files(
 	Ok(files)
 }
 
-fn sort_file_list(files: &mut Vec<TreeFile>) {
+fn sort_file_list(files: &mut [TreeFile]) {
 	files.sort_by(|a, b| path_cmp(&a.path, &b.path));
 }
 
 // applies topologically order on paths sorting
 fn path_cmp(a: &Path, b: &Path) -> Ordering {
-	let mut comp_a = a.components().into_iter().peekable();
-	let mut comp_b = b.components().into_iter().peekable();
+	let mut comp_a = a.components().peekable();
+	let mut comp_b = b.components().peekable();
 
 	loop {
 		let a = comp_a.next();
@@ -73,7 +73,7 @@ fn path_cmp(a: &Path, b: &Path) -> Ordering {
 
 /// will only work on utf8 content
 pub fn tree_file_content(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	file: &TreeFile,
 ) -> Result<String> {
 	scope_time!("tree_file_content");
@@ -130,7 +130,8 @@ mod tests {
 	fn test_smoke() {
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		let c1 =
 			write_commit_file(&repo, "test.txt", "content", "c1");
@@ -155,14 +156,14 @@ mod tests {
 
 	#[test]
 	fn test_sorting() {
-		let mut list = vec!["file", "folder/file", "folder/afile"]
+		let mut list = ["file", "folder/file", "folder/afile"]
 			.iter()
 			.map(|f| TreeFile {
 				path: PathBuf::from(f),
 				filemode: 0,
 				id: Oid::zero(),
 			})
-			.collect();
+			.collect::<Vec<_>>();
 
 		sort_file_list(&mut list);
 
@@ -180,14 +181,14 @@ mod tests {
 
 	#[test]
 	fn test_sorting_folders() {
-		let mut list = vec!["bfolder/file", "afolder/file"]
+		let mut list = ["bfolder/file", "afolder/file"]
 			.iter()
 			.map(|f| TreeFile {
 				path: PathBuf::from(f),
 				filemode: 0,
 				id: Oid::zero(),
 			})
-			.collect();
+			.collect::<Vec<_>>();
 
 		sort_file_list(&mut list);
 
@@ -204,14 +205,14 @@ mod tests {
 
 	#[test]
 	fn test_sorting_folders2() {
-		let mut list = vec!["bfolder/sub/file", "afolder/file"]
+		let mut list = ["bfolder/sub/file", "afolder/file"]
 			.iter()
 			.map(|f| TreeFile {
 				path: PathBuf::from(f),
 				filemode: 0,
 				id: Oid::zero(),
 			})
-			.collect();
+			.collect::<Vec<_>>();
 
 		sort_file_list(&mut list);
 

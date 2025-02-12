@@ -3,6 +3,7 @@ use super::{
 	EventState,
 };
 use crate::{
+	app::Environment,
 	keys::SharedKeyConfig,
 	string_utils::tabs_to_spaces,
 	strings,
@@ -15,23 +16,22 @@ use crate::{
 use anyhow::Result;
 use asyncgit::{
 	asyncjob::AsyncSingleJob,
-	sync::{self, TreeFile},
-	ProgressPercent, CWD,
+	sync::{self, RepoPathRef, TreeFile},
+	ProgressPercent,
 };
-use crossbeam_channel::Sender;
 use crossterm::event::Event;
 use filetreelist::MoveSelection;
 use itertools::Either;
-use std::{cell::Cell, convert::From, path::Path};
-use tui::{
-	backend::Backend,
+use ratatui::{
 	layout::Rect,
 	text::Text,
 	widgets::{Block, Borders, Wrap},
 	Frame,
 };
+use std::{cell::Cell, path::Path};
 
 pub struct SyntaxTextComponent {
+	repo: RepoPathRef,
 	current_file: Option<(String, Either<ui::SyntaxText, String>)>,
 	async_highlighting: AsyncSingleJob<AsyncSyntaxJob>,
 	syntax_progress: Option<ProgressPercent>,
@@ -43,19 +43,18 @@ pub struct SyntaxTextComponent {
 
 impl SyntaxTextComponent {
 	///
-	pub fn new(
-		sender: &Sender<AsyncAppNotification>,
-		key_config: SharedKeyConfig,
-		theme: SharedTheme,
-	) -> Self {
+	pub fn new(env: &Environment) -> Self {
 		Self {
-			async_highlighting: AsyncSingleJob::new(sender.clone()),
+			async_highlighting: AsyncSingleJob::new(
+				env.sender_app.clone(),
+			),
 			syntax_progress: None,
 			current_file: None,
 			paragraph_state: Cell::new(ParagraphState::default()),
 			focused: false,
-			key_config,
-			theme,
+			key_config: env.key_config.clone(),
+			theme: env.theme.clone(),
+			repo: env.repo.clone(),
 		}
 	}
 
@@ -105,12 +104,11 @@ impl SyntaxTextComponent {
 		let already_loaded = self
 			.current_file
 			.as_ref()
-			.map(|(current_file, _)| current_file == &path)
-			.unwrap_or_default();
+			.is_some_and(|(current_file, _)| current_file == &path);
 
 		if !already_loaded {
-			//TODO: fetch file content async aswell
-			match sync::tree_file_content(CWD, item) {
+			//TODO: fetch file content async as well
+			match sync::tree_file_content(&self.repo.borrow(), item) {
 				Ok(content) => {
 					let content = tabs_to_spaces(content);
 					self.syntax_progress =
@@ -129,8 +127,7 @@ impl SyntaxTextComponent {
 					self.current_file = Some((
 						path,
 						Either::Right(format!(
-							"error loading file: {}",
-							e
+							"error loading file: {e}"
 						)),
 					));
 				}
@@ -186,11 +183,7 @@ impl SyntaxTextComponent {
 }
 
 impl DrawableComponent for SyntaxTextComponent {
-	fn draw<B: Backend>(
-		&self,
-		f: &mut Frame<B>,
-		area: Rect,
-	) -> Result<()> {
+	fn draw(&self, f: &mut Frame, area: Rect) -> Result<()> {
 		let text = self.current_file.as_ref().map_or_else(
 			|| Text::from(""),
 			|(_, content)| match content {
@@ -236,6 +229,7 @@ impl DrawableComponent for SyntaxTextComponent {
 					state.height().saturating_sub(2),
 				)),
 				usize::from(state.scroll().y),
+				ui::Orientation::Vertical,
 			);
 		}
 
@@ -264,14 +258,15 @@ impl Component for SyntaxTextComponent {
 
 	fn event(
 		&mut self,
-		event: crossterm::event::Event,
+		event: &crossterm::event::Event,
 	) -> Result<EventState> {
 		if let Event::Key(key) = event {
 			if let Some(nav) = common_nav(key, &self.key_config) {
-				return Ok(self
-					.scroll(nav)
-					.then(|| EventState::Consumed)
-					.unwrap_or(EventState::NotConsumed));
+				return Ok(if self.scroll(nav) {
+					EventState::Consumed
+				} else {
+					EventState::NotConsumed
+				});
 			}
 		}
 

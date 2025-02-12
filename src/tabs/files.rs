@@ -1,57 +1,36 @@
-#![allow(
-	dead_code,
-	clippy::missing_const_for_fn,
-	clippy::unused_self
-)]
-
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::{
+	app::Environment,
 	components::{
 		visibility_blocking, CommandBlocking, CommandInfo, Component,
 		DrawableComponent, EventState, RevisionFilesComponent,
 	},
-	keys::SharedKeyConfig,
-	queue::Queue,
-	ui::style::SharedTheme,
-	AsyncAppNotification, AsyncNotification,
+	AsyncNotification,
 };
 use anyhow::Result;
-use asyncgit::{sync, CWD};
-use crossbeam_channel::Sender;
+use asyncgit::sync::{self, RepoPathRef};
 
 pub struct FilesTab {
+	repo: RepoPathRef,
 	visible: bool,
-	theme: SharedTheme,
-	key_config: SharedKeyConfig,
 	files: RevisionFilesComponent,
 }
 
 impl FilesTab {
 	///
-	pub fn new(
-		sender: &Sender<AsyncAppNotification>,
-		queue: &Queue,
-		theme: SharedTheme,
-		key_config: SharedKeyConfig,
-	) -> Self {
+	pub fn new(env: &Environment) -> Self {
 		Self {
 			visible: false,
-			files: RevisionFilesComponent::new(
-				queue,
-				sender,
-				theme.clone(),
-				key_config.clone(),
-			),
-			theme,
-			key_config,
+			files: RevisionFilesComponent::new(env),
+			repo: env.repo.clone(),
 		}
 	}
 
 	///
 	pub fn update(&mut self) -> Result<()> {
 		if self.is_visible() {
-			if let Ok(head) = sync::get_head(CWD) {
+			if let Ok(head) = sync::get_head(&self.repo.borrow()) {
 				self.files.set_commit(head)?;
 			}
 		}
@@ -65,22 +44,27 @@ impl FilesTab {
 	}
 
 	///
-	pub fn update_async(&mut self, ev: AsyncNotification) {
+	pub fn update_async(
+		&mut self,
+		ev: AsyncNotification,
+	) -> Result<()> {
 		if self.is_visible() {
-			self.files.update(ev);
+			self.files.update(ev)?;
 		}
+
+		Ok(())
 	}
 
-	pub fn file_finder_update(&mut self, file: &Option<PathBuf>) {
+	pub fn file_finder_update(&mut self, file: &Path) {
 		self.files.find_file(file);
 	}
 }
 
 impl DrawableComponent for FilesTab {
-	fn draw<B: tui::backend::Backend>(
+	fn draw(
 		&self,
-		f: &mut tui::Frame<B>,
-		rect: tui::layout::Rect,
+		f: &mut ratatui::Frame,
+		rect: ratatui::layout::Rect,
 	) -> Result<()> {
 		if self.is_visible() {
 			self.files.draw(f, rect)?;
@@ -104,7 +88,7 @@ impl Component for FilesTab {
 
 	fn event(
 		&mut self,
-		ev: crossterm::event::Event,
+		ev: &crossterm::event::Event,
 	) -> Result<EventState> {
 		if self.visible {
 			return self.files.event(ev);

@@ -1,10 +1,16 @@
+use std::borrow::Cow;
+
 use asyncgit::sync::CommitId;
+use unicode_truncate::UnicodeTruncateStr;
+use unicode_width::UnicodeWidthStr;
 
 use crate::keys::SharedKeyConfig;
 
 pub mod order {
-	pub static NAV: i8 = 2;
-	pub static RARE_ACTION: i8 = 1;
+	pub const RARE_ACTION: i8 = 30;
+	pub const NAV: i8 = 20;
+	pub const AVERAGE: i8 = 10;
+	pub const PRIORITY: i8 = 1;
 }
 
 pub static PUSH_POPUP_MSG: &str = "Push";
@@ -23,14 +29,24 @@ pub static PUSH_TAGS_STATES_FETCHING: &str = "fetching";
 pub static PUSH_TAGS_STATES_PUSHING: &str = "pushing";
 pub static PUSH_TAGS_STATES_DONE: &str = "done";
 
+pub static POPUP_TITLE_SUBMODULES: &str = "Submodules";
+pub static POPUP_TITLE_REMOTES: &str = "Remotes";
+pub static POPUP_SUBTITLE_REMOTES: &str = "Details";
+pub static POPUP_TITLE_FUZZY_FIND: &str = "Fuzzy Finder";
+pub static POPUP_TITLE_LOG_SEARCH: &str = "Search";
+
+pub static POPUP_FAIL_COPY: &str = "Failed to copy text";
+pub static POPUP_SUCCESS_COPY: &str = "Copied Text";
+pub static POPUP_COMMIT_SHA_INVALID: &str = "Invalid commit sha";
+
 pub mod symbol {
-	pub const WHITESPACE: &str = "\u{00B7}"; //·
 	pub const CHECKMARK: &str = "\u{2713}"; //✓
 	pub const SPACE: &str = "\u{02FD}"; //˽
 	pub const EMPTY_SPACE: &str = " ";
 	pub const FOLDER_ICON_COLLAPSED: &str = "\u{25b8}"; //▸
 	pub const FOLDER_ICON_EXPANDED: &str = "\u{25be}"; //▾
 	pub const EMPTY_STR: &str = "";
+	pub const ELLIPSIS: char = '\u{2026}'; // …
 }
 
 pub fn title_branches() -> String {
@@ -87,11 +103,21 @@ pub fn msg_opening_editor(_key_config: &SharedKeyConfig) -> String {
 pub fn msg_title_error(_key_config: &SharedKeyConfig) -> String {
 	"Error".to_string()
 }
+pub fn msg_title_info(_key_config: &SharedKeyConfig) -> String {
+	"Info".to_string()
+}
 pub fn commit_title() -> String {
 	"Commit".to_string()
 }
+pub fn commit_reword_title() -> String {
+	"Reword Commit".to_string()
+}
+
 pub fn commit_title_merge() -> String {
 	"Commit (Merge)".to_string()
+}
+pub fn commit_title_revert() -> String {
+	"Commit (Revert)".to_string()
 }
 pub fn commit_title_amend() -> String {
 	"Commit (Amend)".to_string()
@@ -100,15 +126,15 @@ pub fn commit_msg(_key_config: &SharedKeyConfig) -> String {
 	"type commit message..".to_string()
 }
 pub fn commit_first_line_warning(count: usize) -> String {
-	format!("[subject length: {}]", count)
+	format!("[subject length: {count}]")
 }
 pub const fn branch_name_invalid() -> &'static str {
 	"[invalid name]"
 }
 pub fn commit_editor_msg(_key_config: &SharedKeyConfig) -> String {
-	r##"
+	r"
 # Edit your commit message
-# Lines starting with '#' will be ignored"##
+# Lines starting with '#' will be ignored"
 		.to_string()
 }
 pub fn stash_popup_title(_key_config: &SharedKeyConfig) -> String {
@@ -119,6 +145,9 @@ pub fn stash_popup_msg(_key_config: &SharedKeyConfig) -> String {
 }
 pub fn confirm_title_reset() -> String {
 	"Reset".to_string()
+}
+pub fn confirm_title_undo_commit() -> String {
+	"Undo commit".to_string()
 }
 pub fn confirm_title_stashdrop(
 	_key_config: &SharedKeyConfig,
@@ -147,16 +176,19 @@ pub fn confirm_msg_merge(
 	rebase: bool,
 ) -> String {
 	if rebase {
-		format!("Rebase onto {} incoming commits?", incoming)
+		format!("Rebase onto {incoming} incoming commits?")
 	} else {
-		format!("Merge of {} incoming commits?", incoming)
+		format!("Merge of {incoming} incoming commits?")
 	}
 }
 
 pub fn confirm_title_abortmerge() -> String {
 	"Abort merge?".to_string()
 }
-pub fn confirm_msg_abortmerge() -> String {
+pub fn confirm_title_abortrevert() -> String {
+	"Abort revert?".to_string()
+}
+pub fn confirm_msg_revertchanges() -> String {
 	"This will revert all uncommitted changes. Are you sure?"
 		.to_string()
 }
@@ -172,9 +204,11 @@ pub fn confirm_msg_reset() -> String {
 }
 pub fn confirm_msg_reset_lines(lines: usize) -> String {
 	format!(
-		"are you sure you want to discard {} selected lines?",
-		lines
+		"are you sure you want to discard {lines} selected lines?"
 	)
+}
+pub fn confirm_msg_undo_commit() -> String {
+	"confirm undo last commit?".to_string()
 }
 pub fn confirm_msg_stashdrop(
 	_key_config: &SharedKeyConfig,
@@ -212,18 +246,29 @@ pub fn confirm_msg_delete_branch(
 	_key_config: &SharedKeyConfig,
 	branch_ref: &str,
 ) -> String {
-	format!("Confirm deleting branch: '{}' ?", branch_ref)
+	format!("Confirm deleting branch: '{branch_ref}' ?")
 }
 pub fn confirm_title_delete_remote_branch(
 	_key_config: &SharedKeyConfig,
 ) -> String {
 	"Delete Remote Branch".to_string()
 }
+pub fn confirm_title_delete_remote(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"Delete Remote".to_string()
+}
+pub fn confirm_msg_delete_remote(
+	_key_config: &SharedKeyConfig,
+	remote_name: &str,
+) -> String {
+	format!("Confirm deleting remote \"{remote_name}\"")
+}
 pub fn confirm_msg_delete_remote_branch(
 	_key_config: &SharedKeyConfig,
 	branch_ref: &str,
 ) -> String {
-	format!("Confirm deleting remote branch: '{}' ?", branch_ref)
+	format!("Confirm deleting remote branch: '{branch_ref}' ?")
 }
 pub fn confirm_title_delete_tag(
 	_key_config: &SharedKeyConfig,
@@ -234,7 +279,13 @@ pub fn confirm_msg_delete_tag(
 	_key_config: &SharedKeyConfig,
 	tag_name: &str,
 ) -> String {
-	format!("Confirm deleting Tag: '{}' ?", tag_name)
+	format!("Confirm deleting Tag: '{tag_name}' ?")
+}
+pub fn confirm_title_delete_tag_remote() -> String {
+	"Delete Tag (remote)".to_string()
+}
+pub fn confirm_msg_delete_tag_remote(remote_name: &str) -> String {
+	format!("Confirm deleting tag on remote '{remote_name}'?")
 }
 pub fn confirm_title_force_push(
 	_key_config: &SharedKeyConfig,
@@ -246,23 +297,33 @@ pub fn confirm_msg_force_push(
 	branch_ref: &str,
 ) -> String {
 	format!(
-        "Confirm force push to branch '{}' ?  This may rewrite history.",
-        branch_ref
+        "Confirm force push to branch '{branch_ref}' ?  This may rewrite history."
     )
 }
 pub fn log_title(_key_config: &SharedKeyConfig) -> String {
 	"Commit".to_string()
 }
+pub fn file_log_title(
+	file_path: &str,
+	selected: usize,
+	revisions: usize,
+) -> String {
+	format!("Revisions of '{file_path}' ({selected}/{revisions})")
+}
 pub fn blame_title(_key_config: &SharedKeyConfig) -> String {
 	"Blame".to_string()
 }
-pub fn tag_commit_popup_title(
-	_key_config: &SharedKeyConfig,
-) -> String {
+pub fn tag_popup_name_title() -> String {
 	"Tag".to_string()
 }
-pub fn tag_commit_popup_msg(_key_config: &SharedKeyConfig) -> String {
-	"type tag".to_string()
+pub fn tag_popup_name_msg() -> String {
+	"type tag name".to_string()
+}
+pub fn tag_popup_annotation_title(name: &str) -> String {
+	format!("Tag Annotation ({name})")
+}
+pub fn tag_popup_annotation_msg() -> String {
+	"type tag annotation".to_string()
 }
 pub fn stashlist_title(_key_config: &SharedKeyConfig) -> String {
 	"Stashes".to_string()
@@ -291,6 +352,49 @@ pub fn create_branch_popup_msg(
 ) -> String {
 	"type branch name".to_string()
 }
+pub fn rename_remote_popup_title(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"Rename remote".to_string()
+}
+pub fn rename_remote_popup_msg(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"new remote name".to_string()
+}
+pub fn update_remote_url_popup_title(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"Update url".to_string()
+}
+pub fn update_remote_url_popup_msg(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"new remote url".to_string()
+}
+pub fn create_remote_popup_title_name(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"Remote name".to_string()
+}
+pub fn create_remote_popup_title_url(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"Remote url".to_string()
+}
+pub fn create_remote_popup_msg_name(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"type remote name".to_string()
+}
+pub fn create_remote_popup_msg_url(
+	_key_config: &SharedKeyConfig,
+) -> String {
+	"type remote url".to_string()
+}
+pub const fn remote_name_invalid() -> &'static str {
+	"[invalid name]"
+}
 pub fn username_popup_title(_key_config: &SharedKeyConfig) -> String {
 	"Username".to_string()
 }
@@ -313,6 +417,25 @@ pub fn rename_branch_popup_msg(
 	_key_config: &SharedKeyConfig,
 ) -> String {
 	"new branch name".to_string()
+}
+
+pub fn copy_success(s: &str) -> String {
+	format!("{POPUP_SUCCESS_COPY} \"{s}\"")
+}
+
+pub fn ellipsis_trim_start(s: &str, width: usize) -> Cow<str> {
+	if s.width() <= width {
+		Cow::Borrowed(s)
+	} else {
+		Cow::Owned(format!(
+			"[{}]{}",
+			symbol::ELLIPSIS,
+			s.unicode_truncate_start(
+				width.saturating_sub(3 /* front indicator */)
+			)
+			.0
+		))
+	}
 }
 
 pub mod commit {
@@ -345,7 +468,7 @@ pub mod commit {
 		old: bool,
 		hash: &str,
 	) -> String {
-		format!("{}: {}", if old { "Old" } else { "New" }, hash)
+		format!("{}: {hash}", if old { "Old" } else { "New" })
 	}
 	pub fn details_message_title(
 		_key_config: &SharedKeyConfig,
@@ -366,7 +489,7 @@ pub mod commands {
 	static CMD_GROUP_GENERAL: &str = "-- General --";
 	static CMD_GROUP_DIFF: &str = "-- Diff --";
 	static CMD_GROUP_CHANGES: &str = "-- Changes --";
-	static CMD_GROUP_COMMIT: &str = "-- Commit --";
+	static CMD_GROUP_COMMIT_POPUP: &str = "-- Commit Popup --";
 	static CMD_GROUP_STASHING: &str = "-- Stashing --";
 	static CMD_GROUP_STASHES: &str = "-- Stashes --";
 	static CMD_GROUP_LOG: &str = "-- Log --";
@@ -389,6 +512,16 @@ pub mod commands {
 				key_config.get_hint(key_config.keys.file_find)
 			),
 			"find file in tree",
+			CMD_GROUP_GENERAL,
+		)
+	}
+	pub fn find_branch(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Find [{}]",
+				key_config.get_hint(key_config.keys.branch_find)
+			),
+			"find branch in list",
 			CMD_GROUP_GENERAL,
 		)
 	}
@@ -462,8 +595,8 @@ pub mod commands {
 		CommandText::new(
 			format!(
 				"Scroll [{}{}]",
-				key_config.get_hint(key_config.keys.focus_above),
-				key_config.get_hint(key_config.keys.focus_below)
+				key_config.get_hint(key_config.keys.move_up),
+				key_config.get_hint(key_config.keys.move_down)
 			),
 			"scroll up or down in focused view",
 			CMD_GROUP_GENERAL,
@@ -503,6 +636,16 @@ pub mod commands {
 			CMD_GROUP_LOG,
 		)
 	}
+	pub fn copy_path(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Copy Path [{}]",
+				key_config.get_hint(key_config.keys.copy),
+			),
+			"copy selected file path to clipboard",
+			CMD_GROUP_LOG,
+		)
+	}
 	pub fn push_tags(key_config: &SharedKeyConfig) -> CommandText {
 		CommandText::new(
 			format!(
@@ -511,6 +654,54 @@ pub mod commands {
 			),
 			"push tags to remote",
 			CMD_GROUP_LOG,
+		)
+	}
+	pub fn toggle_option(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Toggle Option [{}]",
+				key_config.get_hint(key_config.keys.log_mark_commit),
+			),
+			"toggle search option selected",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn show_tag_annotation(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Annotation [{}]",
+				key_config.get_hint(key_config.keys.move_right),
+			),
+			"show tag annotation",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn diff_hunk_next(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Next hunk [{}]",
+				key_config.get_hint(key_config.keys.diff_hunk_next),
+			),
+			"move cursor to next hunk",
+			CMD_GROUP_DIFF,
+		)
+	}
+	pub fn diff_hunk_prev(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Prev hunk [{}]",
+				key_config.get_hint(key_config.keys.diff_hunk_prev),
+			),
+			"move cursor to prev hunk",
+			CMD_GROUP_DIFF,
 		)
 	}
 	pub fn diff_home_end(
@@ -603,6 +794,19 @@ pub mod commands {
 			CMD_GROUP_DIFF,
 		)
 	}
+	pub fn close_fuzzy_finder(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Close [{}{}]",
+				key_config.get_hint(key_config.keys.exit_popup),
+				key_config.get_hint(key_config.keys.enter),
+			),
+			"close fuzzy finder",
+			CMD_GROUP_GENERAL,
+		)
+	}
 	pub fn close_popup(key_config: &SharedKeyConfig) -> CommandText {
 		CommandText::new(
 			format!(
@@ -610,6 +814,17 @@ pub mod commands {
 				key_config.get_hint(key_config.keys.exit_popup),
 			),
 			"close overlay (e.g commit, help)",
+			CMD_GROUP_GENERAL,
+		)
+	}
+	pub fn scroll_popup(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Scroll [{}{}]",
+				key_config.get_hint(key_config.keys.popup_down),
+				key_config.get_hint(key_config.keys.popup_up),
+			),
+			"scroll up or down in popup",
 			CMD_GROUP_GENERAL,
 		)
 	}
@@ -643,6 +858,163 @@ pub mod commands {
 				key_config.get_hint(key_config.keys.abort_merge),
 			),
 			"abort ongoing merge",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn abort_revert(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Abort revert [{}]",
+				key_config.get_hint(key_config.keys.abort_merge),
+			),
+			"abort ongoing revert",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn view_submodules(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Submodules [{}]",
+				key_config.get_hint(key_config.keys.view_submodules),
+			),
+			"open submodule view",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn view_remotes(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Remotes [{}]",
+				key_config.get_hint(key_config.keys.view_remotes)
+			),
+			"open remotes view",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn update_remote_name(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Edit name [{}]",
+				key_config
+					.get_hint(key_config.keys.update_remote_name)
+			),
+			"updates a remote name",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn update_remote_url(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Edit url [{}]",
+				key_config
+					.get_hint(key_config.keys.update_remote_url)
+			),
+			"updates a remote url",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn create_remote(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Add [{}]",
+				key_config.get_hint(key_config.keys.add_remote)
+			),
+			"creates a new remote",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn delete_remote_popup(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Remove [{}]",
+				key_config.get_hint(key_config.keys.delete_remote),
+			),
+			"remove a remote",
+			CMD_GROUP_BRANCHES,
+		)
+	}
+
+	pub fn remote_confirm_name_msg(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Confirm name [{}]",
+				key_config.get_hint(key_config.keys.enter),
+			),
+			"confirm remote name",
+			CMD_GROUP_BRANCHES,
+		)
+		.hide_help()
+	}
+
+	pub fn remote_confirm_url_msg(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Confirm url [{}]",
+				key_config.get_hint(key_config.keys.enter),
+			),
+			"confirm remote url",
+			CMD_GROUP_BRANCHES,
+		)
+		.hide_help()
+	}
+
+	pub fn open_submodule(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Open [{}]",
+				key_config.get_hint(key_config.keys.enter),
+			),
+			"open submodule",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn open_submodule_parent(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Open Parent [{}]",
+				key_config
+					.get_hint(key_config.keys.view_submodule_parent),
+			),
+			"open submodule parent repo",
+			CMD_GROUP_GENERAL,
+		)
+	}
+
+	pub fn update_submodule(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Update [{}]",
+				key_config.get_hint(key_config.keys.update_submodule),
+			),
+			"update submodule",
 			CMD_GROUP_GENERAL,
 		)
 	}
@@ -712,7 +1084,7 @@ pub mod commands {
 				key_config.get_hint(key_config.keys.open_commit),
 			),
 			"open commit popup (available in non-empty stage)",
-			CMD_GROUP_COMMIT,
+			CMD_GROUP_GENERAL,
 		)
 	}
 	pub fn commit_open_editor(
@@ -725,20 +1097,62 @@ pub mod commands {
 					.get_hint(key_config.keys.open_commit_editor),
 			),
 			"open commit editor (available in commit popup)",
-			CMD_GROUP_COMMIT,
+			CMD_GROUP_COMMIT_POPUP,
 		)
 	}
-	pub fn commit_enter(key_config: &SharedKeyConfig) -> CommandText {
+	pub fn commit_next_msg_from_history(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
 		CommandText::new(
 			format!(
-				"Commit [{}]",
-				key_config.get_hint(key_config.keys.enter),
+				"Previous Msg [{}]",
+				key_config
+					.get_hint(key_config.keys.commit_history_next),
+			),
+			"use previous commit message from history",
+			CMD_GROUP_COMMIT_POPUP,
+		)
+	}
+	pub fn commit_submit(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Do Commit [{}]",
+				key_config.get_hint(key_config.keys.commit),
 			),
 			"commit (available when commit message is non-empty)",
-			CMD_GROUP_COMMIT,
+			CMD_GROUP_COMMIT_POPUP,
 		)
 		.hide_help()
 	}
+	pub fn newline(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"New line [{}]",
+				key_config.get_hint(key_config.keys.newline),
+			),
+			"create line break",
+			CMD_GROUP_COMMIT_POPUP,
+		)
+		.hide_help()
+	}
+	pub fn toggle_verify(
+		key_config: &SharedKeyConfig,
+		current_verify: bool,
+	) -> CommandText {
+		let verb = if current_verify { "disable" } else { "enable" };
+		CommandText::new(
+			format!(
+				"{} hooks [{}]",
+				verb,
+				key_config.get_hint(key_config.keys.toggle_verify),
+			),
+			"toggle running on commit hooks (available in commit popup)",
+			CMD_GROUP_COMMIT_POPUP,
+		)
+	}
+
 	pub fn commit_amend(key_config: &SharedKeyConfig) -> CommandText {
 		CommandText::new(
 			format!(
@@ -746,7 +1160,19 @@ pub mod commands {
 				key_config.get_hint(key_config.keys.commit_amend),
 			),
 			"amend last commit (available in commit popup)",
-			CMD_GROUP_COMMIT,
+			CMD_GROUP_COMMIT_POPUP,
+		)
+	}
+	pub fn commit_signoff(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Sign-off [{}]",
+				key_config.get_hint(key_config.keys.toggle_signoff),
+			),
+			"sign-off commit (-s option)",
+			CMD_GROUP_COMMIT_POPUP,
 		)
 	}
 	pub fn edit_item(key_config: &SharedKeyConfig) -> CommandText {
@@ -830,7 +1256,7 @@ pub mod commands {
 		CommandText::new(
 			format!(
 				"Back [{}]",
-				key_config.get_hint(key_config.keys.focus_left),
+				key_config.get_hint(key_config.keys.move_left),
 			),
 			"view and select changed files",
 			CMD_GROUP_GENERAL,
@@ -842,7 +1268,7 @@ pub mod commands {
 		CommandText::new(
 			format!(
 				"Diff [{}]",
-				key_config.get_hint(key_config.keys.focus_right),
+				key_config.get_hint(key_config.keys.move_right),
 			),
 			"inspect file diff",
 			CMD_GROUP_GENERAL,
@@ -943,7 +1369,7 @@ pub mod commands {
 				if marked == 0 {
 					String::default()
 				} else {
-					format!(" {}", marked)
+					format!(" {marked}")
 				},
 				key_config.get_hint(key_config.keys.stash_drop),
 			),
@@ -969,7 +1395,7 @@ pub mod commands {
 		CommandText::new(
 			format!(
 				"Inspect [{}]",
-				key_config.get_hint(key_config.keys.focus_right),
+				key_config.get_hint(key_config.keys.stash_open),
 			),
 			"open stash commit details (allows to diff files)",
 			CMD_GROUP_STASHES,
@@ -994,7 +1420,7 @@ pub mod commands {
 		CommandText::new(
 			format!(
 				"Inspect [{}]",
-				key_config.get_hint(key_config.keys.focus_right),
+				key_config.get_hint(key_config.keys.move_right),
 			),
 			"inspect selected commit in detail",
 			CMD_GROUP_GENERAL,
@@ -1008,6 +1434,18 @@ pub mod commands {
 				key_config.get_hint(key_config.keys.blame),
 			),
 			"open blame view of selected file",
+			CMD_GROUP_GENERAL,
+		)
+	}
+	pub fn open_file_history(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"History [{}]",
+				key_config.get_hint(key_config.keys.file_history),
+			),
+			"open history of selected file",
 			CMD_GROUP_LOG,
 		)
 	}
@@ -1023,6 +1461,19 @@ pub mod commands {
 			CMD_GROUP_LOG,
 		)
 	}
+	pub fn log_checkout_commit(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Checkout [{}]",
+				key_config
+					.get_hint(key_config.keys.log_checkout_commit),
+			),
+			"checkout commit",
+			CMD_GROUP_LOG,
+		)
+	}
 	pub fn inspect_file_tree(
 		key_config: &SharedKeyConfig,
 	) -> CommandText {
@@ -1035,18 +1486,133 @@ pub mod commands {
 			CMD_GROUP_LOG,
 		)
 	}
-	pub fn tag_commit_confirm_msg(
+	pub fn revert_commit(
 		key_config: &SharedKeyConfig,
 	) -> CommandText {
 		CommandText::new(
 			format!(
-				"Tag [{}]",
+				"Revert [{}]",
+				key_config
+					.get_hint(key_config.keys.status_reset_item),
+			),
+			"revert commit",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn log_reset_commit(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Reset [{}]",
+				key_config.get_hint(key_config.keys.log_reset_commit),
+			),
+			"reset to commit",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn log_reword_commit(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Reword [{}]",
+				key_config
+					.get_hint(key_config.keys.log_reword_commit),
+			),
+			"reword commit message",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn log_find_commit(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Find [{}]",
+				key_config.get_hint(key_config.keys.file_find),
+			),
+			"start commit search",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn log_close_search(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Exit Search [{}]",
+				key_config.get_hint(key_config.keys.exit_popup),
+			),
+			"leave search mode",
+			CMD_GROUP_LOG,
+		)
+	}
+
+	pub fn reset_commit(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Confirm [{}]",
 				key_config.get_hint(key_config.keys.enter),
+			),
+			"confirm reset",
+			CMD_GROUP_LOG,
+		)
+	}
+
+	pub fn reset_branch(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Reset [{}]",
+				key_config.get_hint(key_config.keys.reset_branch),
+			),
+			"confirm reset",
+			CMD_GROUP_BRANCHES,
+		)
+	}
+
+	pub fn reset_type(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Change Type [{}{}]",
+				key_config.get_hint(key_config.keys.move_up),
+				key_config.get_hint(key_config.keys.move_down)
+			),
+			"change reset type",
+			CMD_GROUP_LOG,
+		)
+	}
+	pub fn tag_commit_confirm_msg(
+		key_config: &SharedKeyConfig,
+		is_annotation_mode: bool,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Tag [{}]",
+				key_config.get_hint(if is_annotation_mode {
+					key_config.keys.commit
+				} else {
+					key_config.keys.enter
+				}),
 			),
 			"tag commit",
 			CMD_GROUP_LOG,
 		)
 	}
+
+	pub fn tag_annotate_msg(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Annotate [{}]",
+				key_config.get_hint(key_config.keys.tag_annotate),
+			),
+			"annotate tag",
+			CMD_GROUP_LOG,
+		)
+	}
+
 	pub fn create_branch_confirm_msg(
 		key_config: &SharedKeyConfig,
 	) -> CommandText {
@@ -1257,6 +1823,17 @@ pub mod commands {
 			CMD_GROUP_GENERAL,
 		)
 	}
+
+	pub fn status_fetch(key_config: &SharedKeyConfig) -> CommandText {
+		CommandText::new(
+			format!(
+				"Fetch [{}]",
+				key_config.get_hint(key_config.keys.fetch),
+			),
+			"fetch",
+			CMD_GROUP_GENERAL,
+		)
+	}
 	pub fn status_pull(key_config: &SharedKeyConfig) -> CommandText {
 		CommandText::new(
 			format!(
@@ -1274,10 +1851,23 @@ pub mod commands {
 		CommandText::new(
 			format!(
 				"Fetch [{}]",
-				key_config.get_hint(key_config.keys.pull),
+				key_config.get_hint(key_config.keys.fetch),
 			),
 			"fetch/prune",
 			CMD_GROUP_BRANCHES,
+		)
+	}
+
+	pub fn find_commit_sha(
+		key_config: &SharedKeyConfig,
+	) -> CommandText {
+		CommandText::new(
+			format!(
+				"Search Hash [{}]",
+				key_config.get_hint(key_config.keys.find_commit_sha),
+			),
+			"find commit from sha",
+			CMD_GROUP_LOG,
 		)
 	}
 }

@@ -1,7 +1,5 @@
 use super::style::SharedTheme;
-use std::iter::Iterator;
-use tui::{
-	backend::Backend,
+use ratatui::{
 	buffer::Buffer,
 	layout::Rect,
 	style::Style,
@@ -49,17 +47,15 @@ where
 {
 	fn render(self, area: Rect, buf: &mut Buffer) {
 		// Render items
-		List::new(
-			self.items.map(ListItem::new).collect::<Vec<ListItem>>(),
-		)
-		.block(self.block.unwrap_or_default())
-		.style(self.style)
-		.render(area, buf);
+		List::new(self.items.map(ListItem::new))
+			.block(self.block.unwrap_or_default())
+			.style(self.style)
+			.render(area, buf);
 	}
 }
 
-pub fn draw_list<'b, B: Backend, L, S>(
-	f: &mut Frame<B>,
+pub fn draw_list<'b, L, S>(
+	f: &mut Frame,
 	r: Rect,
 	title: &'b str,
 	items: L,
@@ -78,8 +74,8 @@ pub fn draw_list<'b, B: Backend, L, S>(
 	f.render_widget(list, r);
 }
 
-pub fn draw_list_block<'b, B: Backend, L, S>(
-	f: &mut Frame<B>,
+pub fn draw_list_block<'b, L, S>(
+	f: &mut Frame,
 	r: Rect,
 	block: Block<'b>,
 	items: L,

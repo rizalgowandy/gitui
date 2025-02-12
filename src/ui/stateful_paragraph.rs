@@ -1,12 +1,12 @@
 use easy_cast::Cast;
-use std::iter;
-use tui::{
+use ratatui::{
 	buffer::Buffer,
-	layout::{Alignment, Rect},
+	layout::{Alignment, Position, Rect},
 	style::Style,
 	text::{StyledGrapheme, Text},
 	widgets::{Block, StatefulWidget, Widget, Wrap},
 };
+use std::iter;
 use unicode_width::UnicodeWidthStr;
 
 use super::reflow::{LineComposer, LineTruncator, WordWrapper};
@@ -89,7 +89,6 @@ impl<'a> StatefulParagraph<'a> {
 		}
 	}
 
-	#[allow(clippy::missing_const_for_fn)]
 	pub fn block(mut self, block: Block<'a>) -> Self {
 		self.block = Some(block);
 		self
@@ -99,19 +98,9 @@ impl<'a> StatefulParagraph<'a> {
 		self.wrap = Some(wrap);
 		self
 	}
-
-	// pub const fn style(mut self, style: Style) -> Self {
-	// 	self.style = style;
-	// 	self
-	// }
-
-	// pub const fn alignment(mut self, alignment: Alignment) -> Self {
-	// 	self.alignment = alignment;
-	// 	self
-	// }
 }
 
-impl<'a> StatefulWidget for StatefulParagraph<'a> {
+impl StatefulWidget for StatefulParagraph<'_> {
 	type State = ParagraphState;
 
 	fn render(
@@ -121,23 +110,19 @@ impl<'a> StatefulWidget for StatefulParagraph<'a> {
 		state: &mut Self::State,
 	) {
 		buf.set_style(area, self.style);
-		let text_area = match self.block.take() {
-			Some(b) => {
-				let inner_area = b.inner(area);
-				b.render(area, buf);
-				inner_area
-			}
-			None => area,
-		};
+		let text_area = self.block.take().map_or(area, |b| {
+			let inner_area = b.inner(area);
+			b.render(area, buf);
+			inner_area
+		});
 
 		if text_area.height < 1 {
 			return;
 		}
 
 		let style = self.style;
-		let mut styled = self.text.lines.iter().flat_map(|spans| {
-			spans
-				.0
+		let mut styled = self.text.lines.iter().flat_map(|line| {
+			line.spans
 				.iter()
 				.flat_map(|span| span.styled_graphemes(style))
 				// Required given the way composers work but might be refactored out if we change
@@ -178,18 +163,20 @@ impl<'a> StatefulWidget for StatefulParagraph<'a> {
 					self.alignment,
 				);
 				for StyledGrapheme { symbol, style } in current_line {
-					buf.get_mut(
+					buf.cell_mut(Position::new(
 						text_area.left() + x,
 						text_area.top() + y - state.scroll.y,
-					)
-					.set_symbol(if symbol.is_empty() {
-						// If the symbol is empty, the last char which rendered last time will
-						// leave on the line. It's a quick fix.
-						" "
-					} else {
-						symbol
-					})
-					.set_style(*style);
+					))
+					.map(|cell| {
+						cell.set_symbol(if symbol.is_empty() {
+							// If the symbol is empty, the last char which rendered last time will
+							// leave on the line. It's a quick fix.
+							" "
+						} else {
+							symbol
+						})
+						.set_style(*style)
+					});
 					x += Cast::<u16>::cast(symbol.width());
 				}
 			}

@@ -129,7 +129,7 @@ impl StatusTree {
 
 	///
 	pub fn move_selection(&mut self, dir: MoveSelection) -> bool {
-		self.selection.map_or(false, |selection| {
+		self.selection.is_some_and(|selection| {
 			let selection_change = match dir {
 				MoveSelection::Up => {
 					self.selection_updown(selection, true)
@@ -352,7 +352,7 @@ impl StatusTree {
 			*collapsed = true;
 		}
 
-		let path = format!("{}/", path);
+		let path = format!("{path}/");
 
 		for i in index + 1..self.tree.len() {
 			let item = &mut self.tree[i];
@@ -373,7 +373,7 @@ impl StatusTree {
 			*collapsed = false;
 		}
 
-		let path = format!("{}/", path);
+		let path = format!("{path}/");
 
 		self.update_visibility(
 			Some(path.as_str()),
@@ -444,7 +444,7 @@ mod tests {
 			.collect::<Vec<_>>()
 	}
 
-	fn get_visibles(tree: &StatusTree) -> Vec<bool> {
+	fn get_visible(tree: &StatusTree) -> Vec<bool> {
 		tree.tree
 			.items()
 			.iter()
@@ -503,16 +503,13 @@ mod tests {
 
 		res.update(&string_vec_to_status(&["a/b"])).unwrap();
 		assert_eq!(
-			get_visibles(&res),
+			get_visible(&res),
 			vec![
 				true,  //
 				false, //
 			]
 		);
-		assert_eq!(
-			res.is_visible_index(res.selection.unwrap()),
-			true
-		);
+		assert!(res.is_visible_index(res.selection.unwrap()));
 		assert_eq!(res.selection, Some(0));
 	}
 
@@ -533,7 +530,7 @@ mod tests {
 		);
 
 		assert_eq!(
-			get_visibles(&res),
+			get_visible(&res),
 			vec![
 				true,  //
 				false, //
@@ -554,7 +551,7 @@ mod tests {
 		);
 
 		assert_eq!(
-			get_visibles(&res),
+			get_visible(&res),
 			vec![
 				true,  //
 				false, //
@@ -581,10 +578,10 @@ mod tests {
 
 		res.collapse(&String::from("a/b"), 1);
 
-		let visibles = get_visibles(&res);
+		let visible = get_visible(&res);
 
 		assert_eq!(
-			visibles,
+			visible,
 			vec![
 				true,  //
 				true,  //
@@ -595,10 +592,10 @@ mod tests {
 
 		res.expand(&String::from("a/b"), 1);
 
-		let visibles = get_visibles(&res);
+		let visible = get_visible(&res);
 
 		assert_eq!(
-			visibles,
+			visible,
 			vec![
 				true, //
 				true, //
@@ -628,7 +625,7 @@ mod tests {
 		res.collapse(&String::from("a"), 0);
 
 		assert_eq!(
-			get_visibles(&res),
+			get_visible(&res),
 			vec![
 				true,  //
 				false, //
@@ -641,7 +638,7 @@ mod tests {
 		res.expand(&String::from("a"), 0);
 
 		assert_eq!(
-			get_visibles(&res),
+			get_visible(&res),
 			vec![
 				true,  //
 				true,  //
@@ -669,10 +666,10 @@ mod tests {
 
 		res.collapse(&String::from("a"), 0);
 
-		let visibles = get_visibles(&res);
+		let visible = get_visible(&res);
 
 		assert_eq!(
-			visibles,
+			visible,
 			vec![
 				true,  //
 				false, //
@@ -699,10 +696,10 @@ mod tests {
 
 		res.collapse(&String::from("a/b"), 1);
 
-		let visibles = get_visibles(&res);
+		let visible = get_visible(&res);
 
 		assert_eq!(
-			visibles,
+			visible,
 			vec![
 				true,  //
 				true,  //
@@ -713,10 +710,10 @@ mod tests {
 
 		res.collapse(&String::from("a"), 0);
 
-		let visibles = get_visibles(&res);
+		let visible = get_visible(&res);
 
 		assert_eq!(
-			visibles,
+			visible,
 			vec![
 				true,  //
 				false, //
@@ -727,10 +724,10 @@ mod tests {
 
 		res.expand(&String::from("a"), 0);
 
-		let visibles = get_visibles(&res);
+		let visible = get_visible(&res);
 
 		assert_eq!(
-			visibles,
+			visible,
 			vec![
 				true,  //
 				true,  //

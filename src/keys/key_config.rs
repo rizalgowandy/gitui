@@ -1,14 +1,19 @@
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::{path::PathBuf, rc::Rc};
+use crossterm::event::{KeyCode, KeyModifiers};
+use std::{fs::canonicalize, path::PathBuf, rc::Rc};
 
 use crate::{args::get_app_config_path, strings::symbol};
 
-use super::{key_list::KeysList, symbols::KeySymbols};
+use super::{
+	key_list::{GituiKeyEvent, KeysList},
+	symbols::KeySymbols,
+};
 
 pub type SharedKeyConfig = Rc<KeyConfig>;
+const KEY_LIST_FILENAME: &str = "key_bindings.ron";
+const KEY_SYMBOLS_FILENAME: &str = "key_symbols.ron";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct KeyConfig {
 	pub keys: KeysList,
 	symbols: KeySymbols,
@@ -17,12 +22,16 @@ pub struct KeyConfig {
 impl KeyConfig {
 	fn get_config_file() -> Result<PathBuf> {
 		let app_home = get_app_config_path()?;
-		Ok(app_home.join("key_bindings.ron"))
+		let config_file = app_home.join(KEY_LIST_FILENAME);
+		canonicalize(&config_file)
+			.map_or_else(|_| Ok(config_file), Ok)
 	}
 
 	fn get_symbols_file() -> Result<PathBuf> {
 		let app_home = get_app_config_path()?;
-		Ok(app_home.join("key_symbols.ron"))
+		let symbols_file = app_home.join(KEY_SYMBOLS_FILENAME);
+		canonicalize(&symbols_file)
+			.map_or_else(|_| Ok(symbols_file), Ok)
 	}
 
 	pub fn init() -> Result<Self> {
@@ -52,7 +61,7 @@ impl KeyConfig {
 		}
 	}
 
-	pub fn get_hint(&self, ev: KeyEvent) -> String {
+	pub fn get_hint(&self, ev: GituiKeyEvent) -> String {
 		match ev.code {
 			KeyCode::Down
 			| KeyCode::Up
@@ -93,6 +102,7 @@ impl KeyConfig {
 			KeyCode::Null => {
 				self.get_modifier_hint(ev.modifiers).into()
 			}
+			_ => String::new(),
 		}
 	}
 
@@ -109,15 +119,160 @@ impl KeyConfig {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+	use std::fs;
+	use std::io::Write;
+	use tempfile::NamedTempFile;
 
 	#[test]
 	fn test_get_hint() {
 		let config = KeyConfig::default();
-		let h = config.get_hint(KeyEvent {
-			code: KeyCode::Char('c'),
-			modifiers: KeyModifiers::CONTROL,
-		});
+		let h = config.get_hint(GituiKeyEvent::new(
+			KeyCode::Char('c'),
+			KeyModifiers::CONTROL,
+		));
 		assert_eq!(h, "^c");
+	}
+
+	#[test]
+	fn test_symbolic_links() {
+		let app_home = get_app_config_path().unwrap();
+		// save current config
+		let original_key_list_path = app_home.join(KEY_LIST_FILENAME);
+		let renamed_key_list = if original_key_list_path.exists() {
+			let temp = NamedTempFile::new_in(&app_home).unwrap();
+			fs::rename(&original_key_list_path, &temp).unwrap();
+			Some(temp)
+		} else {
+			None
+		};
+		let original_key_symbols_path =
+			app_home.join(KEY_SYMBOLS_FILENAME);
+		let renamed_key_symbols = if original_key_symbols_path
+			.exists()
+		{
+			let temp = NamedTempFile::new_in(&app_home).unwrap();
+			fs::rename(&original_key_symbols_path, &temp).unwrap();
+			Some(temp)
+		} else {
+			None
+		};
+
+		// create temporary config files
+		let mut temporary_key_list =
+			NamedTempFile::new_in(&app_home).unwrap();
+		writeln!(
+			temporary_key_list,
+			r#"
+(
+	move_down: Some(( code: Char('j'), modifiers: "CONTROL")),
+)
+"#
+		)
+		.unwrap();
+
+		let mut temporary_key_symbols =
+			NamedTempFile::new_in(&app_home).unwrap();
+		writeln!(
+			temporary_key_symbols,
+			r#"
+(
+	esc: Some("Esc"),
+)
+"#
+		)
+		.unwrap();
+
+		// testing
+		let result = std::panic::catch_unwind(|| {
+			let loaded_config = KeyConfig::init().unwrap();
+			assert_eq!(
+				loaded_config.keys.move_down,
+				KeysList::default().move_down
+			);
+			assert_eq!(
+				loaded_config.symbols.esc,
+				KeySymbols::default().esc
+			);
+
+			create_symlink(
+				&temporary_key_symbols,
+				&original_key_symbols_path,
+			)
+			.unwrap();
+			let loaded_config = KeyConfig::init().unwrap();
+			assert_eq!(
+				loaded_config.keys.move_down,
+				KeysList::default().move_down
+			);
+			assert_eq!(loaded_config.symbols.esc, "Esc");
+
+			create_symlink(
+				&temporary_key_list,
+				&original_key_list_path,
+			)
+			.unwrap();
+			let loaded_config = KeyConfig::init().unwrap();
+			assert_eq!(
+				loaded_config.keys.move_down,
+				GituiKeyEvent::new(
+					KeyCode::Char('j'),
+					KeyModifiers::CONTROL
+				)
+			);
+			assert_eq!(loaded_config.symbols.esc, "Esc");
+
+			fs::remove_file(&original_key_symbols_path).unwrap();
+			let loaded_config = KeyConfig::init().unwrap();
+			assert_eq!(
+				loaded_config.keys.move_down,
+				GituiKeyEvent::new(
+					KeyCode::Char('j'),
+					KeyModifiers::CONTROL
+				)
+			);
+			assert_eq!(
+				loaded_config.symbols.esc,
+				KeySymbols::default().esc
+			);
+
+			fs::remove_file(&original_key_list_path).unwrap();
+		});
+
+		// remove symlinks from testing if they still exist
+		let _ = fs::remove_file(&original_key_list_path);
+		let _ = fs::remove_file(&original_key_symbols_path);
+
+		// restore original config files
+		if let Some(temp) = renamed_key_list {
+			let _ = fs::rename(&temp, &original_key_list_path);
+		}
+
+		if let Some(temp) = renamed_key_symbols {
+			let _ = fs::rename(&temp, &original_key_symbols_path);
+		}
+
+		assert!(result.is_ok());
+	}
+
+	#[cfg(not(target_os = "windows"))]
+	fn create_symlink<
+		P: AsRef<std::path::Path>,
+		Q: AsRef<std::path::Path>,
+	>(
+		original: P,
+		link: Q,
+	) -> Result<(), std::io::Error> {
+		std::os::unix::fs::symlink(original, link)
+	}
+
+	#[cfg(target_os = "windows")]
+	fn create_symlink<
+		P: AsRef<std::path::Path>,
+		Q: AsRef<std::path::Path>,
+	>(
+		original: P,
+		link: Q,
+	) -> Result<(), std::io::Error> {
+		std::os::windows::fs::symlink_file(original, link)
 	}
 }

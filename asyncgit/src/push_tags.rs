@@ -3,8 +3,9 @@ use crate::{
 	sync::{
 		cred::BasicAuthCredential,
 		remotes::tags::{push_tags, PushTagsProgress},
+		RepoPath,
 	},
-	AsyncGitNotification, RemoteProgress, CWD,
+	AsyncGitNotification, RemoteProgress,
 };
 use crossbeam_channel::{unbounded, Sender};
 use std::{
@@ -31,12 +32,17 @@ pub struct AsyncPushTags {
 	last_result: Arc<Mutex<Option<String>>>,
 	progress: Arc<Mutex<Option<PushTagsProgress>>>,
 	sender: Sender<AsyncGitNotification>,
+	repo: RepoPath,
 }
 
 impl AsyncPushTags {
 	///
-	pub fn new(sender: &Sender<AsyncGitNotification>) -> Self {
+	pub fn new(
+		repo: RepoPath,
+		sender: &Sender<AsyncGitNotification>,
+	) -> Self {
 		Self {
+			repo,
 			state: Arc::new(Mutex::new(None)),
 			last_result: Arc::new(Mutex::new(None)),
 			progress: Arc::new(Mutex::new(None)),
@@ -63,7 +69,7 @@ impl AsyncPushTags {
 	}
 
 	///
-	pub fn request(&mut self, params: PushTagsRequest) -> Result<()> {
+	pub fn request(&self, params: PushTagsRequest) -> Result<()> {
 		log::trace!("request");
 
 		if self.is_pending()? {
@@ -77,6 +83,7 @@ impl AsyncPushTags {
 		let arc_res = Arc::clone(&self.last_result);
 		let arc_progress = Arc::clone(&self.progress);
 		let sender = self.sender.clone();
+		let repo = self.repo.clone();
 
 		thread::spawn(move || {
 			let (progress_sender, receiver) = unbounded();
@@ -89,7 +96,7 @@ impl AsyncPushTags {
 			);
 
 			let res = push_tags(
-				CWD,
+				&repo,
 				params.remote.as_str(),
 				params.basic_credential.clone(),
 				Some(progress_sender),
@@ -138,7 +145,7 @@ impl AsyncPushTags {
 		let mut last_res = arc_result.lock()?;
 
 		*last_res = match res {
-			Ok(_) => None,
+			Ok(()) => None,
 			Err(e) => {
 				log::error!("push error: {}", e);
 				Some(e.to_string())

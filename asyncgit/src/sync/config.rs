@@ -1,11 +1,18 @@
-use super::utils::repo;
+//TODO: hopefully released in next rust (see https://github.com/rust-lang/rust-clippy/issues/9440)
+#![allow(clippy::use_self)]
+
 use crate::error::Result;
 use git2::Repository;
 use scopetime::scope_time;
+use serde::{Deserialize, Serialize};
+
+use super::{repository::repo, RepoPath};
 
 // see https://git-scm.com/docs/git-config#Documentation/git-config.txt-statusshowUntrackedFiles
 /// represents the `status.showUntrackedFiles` git config state
-#[derive(Hash, Copy, Clone, PartialEq)]
+#[derive(
+	Hash, Copy, Clone, PartialEq, Eq, Serialize, Deserialize,
+)]
 pub enum ShowUntrackedFilesConfig {
 	///
 	No,
@@ -57,7 +64,7 @@ pub fn untracked_files_config_repo(
 
 ///
 pub fn untracked_files_config(
-	repo_path: &str,
+	repo_path: &RepoPath,
 ) -> Result<ShowUntrackedFilesConfig> {
 	let repo = repo(repo_path)?;
 	untracked_files_config_repo(&repo)
@@ -65,7 +72,7 @@ pub fn untracked_files_config(
 
 /// get string from config
 pub fn get_config_string(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	key: &str,
 ) -> Result<Option<String>> {
 	let repo = repo(repo_path)?;
@@ -80,13 +87,12 @@ pub fn get_config_string_repo(
 
 	let cfg = repo.config()?;
 
-	// this code doesnt match what the doc says regarding what
+	// this code doesn't match what the doc says regarding what
 	// gets returned when but it actually works
 	let entry_res = cfg.get_entry(key);
 
-	let entry = match entry_res {
-		Ok(ent) => ent,
-		Err(_) => return Ok(None),
+	let Ok(entry) = entry_res else {
+		return Ok(None);
 	};
 
 	if entry.has_value() {
@@ -103,18 +109,21 @@ mod tests {
 
 	#[test]
 	fn test_get_config() {
-		let bad_dir_cfg =
-			get_config_string("oodly_noodly", "this.doesnt.exist");
+		let bad_dir_cfg = get_config_string(
+			&"oodly_noodly".into(),
+			"this.doesnt.exist",
+		);
 		assert!(bad_dir_cfg.is_err());
 
 		let (_td, repo) = repo_init().unwrap();
 		let path = repo.path();
 		let rpath = path.as_os_str().to_str().unwrap();
-		let bad_cfg = get_config_string(rpath, "this.doesnt.exist");
+		let bad_cfg =
+			get_config_string(&rpath.into(), "this.doesnt.exist");
 		assert!(bad_cfg.is_ok());
 		assert!(bad_cfg.unwrap().is_none());
 		// repo init sets user.name
-		let good_cfg = get_config_string(rpath, "user.name");
+		let good_cfg = get_config_string(&rpath.into(), "user.name");
 		assert!(good_cfg.is_ok());
 		assert!(good_cfg.unwrap().is_some());
 	}

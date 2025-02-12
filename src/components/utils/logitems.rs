@@ -1,6 +1,7 @@
 use asyncgit::sync::{CommitId, CommitInfo};
-use chrono::{DateTime, Duration, Local, NaiveDateTime, Utc};
-use std::slice::Iter;
+use chrono::{DateTime, Duration, Local, Utc};
+use indexmap::IndexSet;
+use std::{rc::Rc, slice::Iter};
 
 #[cfg(feature = "ghemoji")]
 use super::emoji::emojifi_string;
@@ -18,15 +19,26 @@ pub struct LogEntry {
 	//TODO: use tinyvec here
 	pub hash_short: BoxStr,
 	pub id: CommitId,
+	pub highlighted: bool,
 }
 
 impl From<CommitInfo> for LogEntry {
 	fn from(c: CommitInfo) -> Self {
-		let time =
-			DateTime::<Local>::from(DateTime::<Utc>::from_utc(
-				NaiveDateTime::from_timestamp(c.time, 0),
-				Utc,
-			));
+		let hash_short = c.id.get_short_string().into();
+
+		let time = {
+			let date = DateTime::from_timestamp(c.time, 0)
+				.map(|d| d.naive_utc());
+			if date.is_none() {
+				log::error!("error reading commit date: {hash_short} - timestamp: {}",c.time);
+			}
+			DateTime::<Local>::from(
+				DateTime::<Utc>::from_naive_utc_and_offset(
+					date.unwrap_or_default(),
+					Utc,
+				),
+			)
+		};
 
 		let author = c.author;
 		#[allow(unused_mut)]
@@ -40,8 +52,9 @@ impl From<CommitInfo> for LogEntry {
 			author: author.into(),
 			msg: msg.into(),
 			time,
-			hash_short: c.id.get_short_string().into(),
+			hash_short,
 			id: c.id,
+			highlighted: false,
 		}
 	}
 }
@@ -49,14 +62,16 @@ impl From<CommitInfo> for LogEntry {
 impl LogEntry {
 	pub fn time_to_string(&self, now: DateTime<Local>) -> String {
 		let delta = now - self.time;
-		if delta < Duration::minutes(30) {
-			let delta_str = if delta < Duration::minutes(1) {
+		if delta < Duration::try_minutes(30).unwrap_or_default() {
+			let delta_str = if delta
+				< Duration::try_minutes(1).unwrap_or_default()
+			{
 				"<1m ago".to_string()
 			} else {
 				format!("{:0>2}m ago", delta.num_minutes())
 			};
-			format!("{: <10}", delta_str)
-		} else if self.time.date() == now.date() {
+			format!("{delta_str: <10}")
+		} else if self.time.date_naive() == now.date_naive() {
 			self.time.format("%T  ").to_string()
 		} else {
 			self.time.format("%Y-%m-%d").to_string()
@@ -67,18 +82,29 @@ impl LogEntry {
 ///
 #[derive(Default)]
 pub struct ItemBatch {
-	index_offset: usize,
+	index_offset: Option<usize>,
 	items: Vec<LogEntry>,
+	highlighting: bool,
 }
 
 impl ItemBatch {
 	fn last_idx(&self) -> usize {
-		self.index_offset + self.items.len()
+		self.index_offset() + self.items.len()
 	}
 
 	///
-	pub const fn index_offset(&self) -> usize {
+	pub fn index_offset(&self) -> usize {
+		self.index_offset.unwrap_or_default()
+	}
+
+	///
+	pub const fn index_offset_raw(&self) -> Option<usize> {
 		self.index_offset
+	}
+
+	///
+	pub const fn highlighting(&self) -> bool {
+		self.highlighting
 	}
 
 	/// shortcut to get an `Iter` of our internal items
@@ -86,9 +112,10 @@ impl ItemBatch {
 		self.items.iter()
 	}
 
-	/// clear curent list of items
+	/// clear current list of items
 	pub fn clear(&mut self) {
 		self.items.clear();
+		self.index_offset = None;
 	}
 
 	/// insert new batch of items
@@ -96,10 +123,25 @@ impl ItemBatch {
 		&mut self,
 		start_index: usize,
 		commits: Vec<CommitInfo>,
+		highlighted: Option<&Rc<IndexSet<CommitId>>>,
 	) {
-		self.items.clear();
-		self.items.extend(commits.into_iter().map(LogEntry::from));
-		self.index_offset = start_index;
+		self.clear();
+
+		if !commits.is_empty() {
+			self.items.extend(commits.into_iter().map(|c| {
+				let id = c.id;
+				let mut entry = LogEntry::from(c);
+				if highlighted.as_ref().is_some_and(|highlighted| {
+					highlighted.contains(&id)
+				}) {
+					entry.highlighted = true;
+				}
+				entry
+			}));
+
+			self.index_offset = Some(start_index);
+			self.highlighting = highlighted.is_some();
+		}
 	}
 
 	/// returns `true` if we should fetch updated list of items
@@ -110,9 +152,20 @@ impl ItemBatch {
 			.saturating_add(SLICE_OFFSET_RELOAD_THRESHOLD)
 			.min(idx_max);
 
-		let needs_data_top = want_min < self.index_offset;
+		let needs_data_top = want_min < self.index_offset();
 		let needs_data_bottom = want_max >= self.last_idx();
 		needs_data_bottom || needs_data_top
+	}
+}
+
+impl<'a> IntoIterator for &'a ItemBatch {
+	type IntoIter = std::slice::Iter<
+		'a,
+		crate::components::utils::logitems::LogEntry,
+	>;
+	type Item = &'a crate::components::utils::logitems::LogEntry;
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter()
 	}
 }
 

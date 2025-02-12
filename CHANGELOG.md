@@ -7,13 +7,392 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+* After commit: jump back to unstaged area [[@tommady](https://github.com/tommady)] ([#2476](https://github.com/extrawurst/gitui/issues/2476))
+
+## [0.27.0] - 2024-01-14
+
+**new: manage remotes**
+
+![add-remote](assets/add-remote.png)
+
+### Breaking Changes
+* use default shell instead of bash on Unix-like OS [[@yerke](https://github.com/yerke)] ([#2343](https://github.com/extrawurst/gitui/pull/2343))
+
+### Added
+* add popups for viewing, adding, updating and removing remotes [[@robin-thoene](https://github.com/robin-thoene)] ([#2172](https://github.com/extrawurst/gitui/issues/2172))
+* support for `Copy Path` action in WSL [[@johnDeSilencio](https://github.com/johnDeSilencio)] ([#2413](https://github.com/extrawurst/gitui/pull/2413))
+* help popup scrollbar [[@wugeer](https://github.com/wugeer)] ([#2388](https://github.com/extrawurst/gitui/pull/2388))
+
+### Fixes
+* respect env vars like `GIT_CONFIG_GLOBAL` ([#2298](https://github.com/extrawurst/gitui/issues/2298))
+* Set `CREATE_NO_WINDOW` flag when executing Git hooks on Windows ([#2371](https://github.com/extrawurst/gitui/pull/2371))
+
+## [0.26.3] - 2024-06-02
+
+### Breaking Changes
+
+#### Theme file format
+
+**note:** this actually applied to the previous release already: `0.26.2`
+
+Ratatui (upstream terminal rendering crate) changed its serialization format for Colors. So the theme files have to be adjusted.
+
+`selection_fg: Some(White)` -> `selection_fg: Some("White")`
+
+but this also allows us now to define colors in the common hex format:
+
+`selection_fg: Some(Rgb(0,255,0))` -> `selection_fg: Some("#00ff00")`
+
+Checkout [THEMES.md](./THEMES.md) for more info.
+
+### Added
+* due to github runner changes, the regular mac build is now arm64, so we added support for intel x86 apple build in nightlies and releases (via separat artifact)
+* support `BUILD_GIT_COMMIT_ID` enabling builds from `git archive` generated source tarballs or other outside a git repo [[@alerque](https://github.com/alerque)] ([#2187](https://github.com/extrawurst/gitui/pull/2187))
+
+### Fixes
+* update yanked dependency to `libc` to fix building with `--locked`.
+* document breaking change in theme file format.
+
+## [0.26.2] - 2024-04-17
+
+**note:** this release introduced a breaking change documented in the following release: `0.26.3`
+
+### Fixes
+* fix `cargo install` without `--locked` ([#2098](https://github.com/extrawurst/gitui/issues/2098))
+* respect configuration for remote when fetching (also applies to pulling) [[@cruessler](https://github.com/cruessler)] ([#1093](https://github.com/extrawurst/gitui/issues/1093))
+* add `:` character to sign-off trailer to comply with Conventinoal Commits standard [@semioticrobotic](https://github.com/semioticrobotic) ([#2196](https://github.com/extrawurst/gitui/issues/2196))
+
+### Added
+* support overriding `build_date` for [reproducible builds](https://reproducible-builds.org/) [[@bmwiedemann](https://github.com/bmwiedemann)] ([#2202](https://github.com/extrawurst/gitui/pull/2202))
+
+## [0.26.0+1] - 2024-04-14
+
+**0.26.1**
+this release has no changes to `0.26.0` but provides windows binaries that were missing before.
+
+**commit signing**
+
+![signing](assets/gitui-signing.png)
+
+### Added
+* sign commits using openpgp [[@hendrikmaus](https://github.com/hendrikmaus)] ([#97](https://github.com/extrawurst/gitui/issues/97))
+* support ssh commit signing (when `user.signingKey` and `gpg.format = ssh` of gitconfig are set; ssh-agent isn't yet supported)  [[@yanganto](https://github.com/yanganto)] ([#1149](https://github.com/extrawurst/gitui/issues/1149))
+* provide nightly builds (see [NIGHTLIES.md](./NIGHTLIES.md)) ([#2083](https://github.com/extrawurst/gitui/issues/2083))
+* more version info in `gitui -V` and `help popup` (including git hash)
+* support `core.commitChar` filtering [[@concelare](https://github.com/concelare)] ([#2136](https://github.com/extrawurst/gitui/issues/2136))
+* allow reset in branch popup ([#2170](https://github.com/extrawurst/gitui/issues/2170))
+* respect configuration for remote when pushing [[@cruessler](https://github.com/cruessler)] ([#2156](https://github.com/extrawurst/gitui/issues/2156))
+
+### Changed
+* Make info and error message popups scrollable [[@MichaelAug](https://github.com/MichaelAug)] ([#1138](https://github.com/extrawurst/gitui/issues/1138))
+* clarify `x86_64` linux binary in artifact names: `gitui-linux-x86_64.tar.gz` (formerly known as `musl`) ([#2148](https://github.com/extrawurst/gitui/issues/2148))
+
+### Fixes
+* add syntax highlighting support for more file types, e.g. Typescript, TOML, etc. [[@martihomssoler](https://github.com/martihomssoler)] ([#2005](https://github.com/extrawurst/gitui/issues/2005))
+* windows release deployment was broken (reason for release `0.26.1`) [218d739](https://github.com/extrawurst/gitui/commit/218d739b035a034b7bf547629d24787909f467bf)
+
+## [0.25.2] - 2024-03-22
+
+### Fixes
+* blame sometimes crashed due to new syntax highlighting [[@tdtrung17693](https://github.com/tdtrung17693)] ([#2130](https://github.com/extrawurst/gitui/issues/2130))
+* going to file tree view at certin commit from the commit-details view broke [[@martihomssoler](https://github.com/martihomssoler)] ([#2114](https://github.com/extrawurst/gitui/issues/2114))
+* `0.25` broke creating annotated tags ([#2126](https://github.com/extrawurst/gitui/issues/2126))
+
+### Changed
+* re-enable clippy `missing_const_for_fn` linter warning and added const to functions where applicable ([#2116](https://github.com/extrawurst/gitui/issues/2116))
+
+## [0.25.1] - 2024-02-23
+
+### Fixes
+* bump yanked dependency `bumpalo` to fix build from source ([#2087](https://github.com/extrawurst/gitui/issues/2087))
+* pin `ratatui` version to fix building without locked `cargo install gitui` ([#2090](https://github.com/extrawurst/gitui/issues/2090))
+
+## [0.25.0] - 2024-02-21
+
+** multiline text editor **
+
+![multiline editor](assets/multiline-texteditor.gif)
+
+** syntax highlighting in blame **
+
+![syntax-highlighting-blame](assets/syntax-highlighting-blame.png)
+
+### Breaking Change
+
+#### commit key binding
+
+The Commit message popup now supports multiline editing! Inserting a **newline** defaults to `enter`. This comes with a new default to confirm the commit message (`ctrl+d`).
+Both commands can be overwritten via `newline` and `commit` in the key bindings. see [KEY_CONFIG](./KEY_CONFIG.md) on how.
+These defaults require some adoption from existing users but feel more natural to new users.
+
+#### key binding bitflags
+
+Modifiers like `SHIFT` or `CONTROL` are no longer configured via magic bitflags but via strings thanks to changes in the [bitflags crate](https://github.com/bitflags/bitflags/blob/main/CHANGELOG.md#changes-to-serde-serialization) we depend on. Please see [KEY_CONFIG.md](./KEY_CONFIG.md) or [vim_style_key_config.ron](./vim_style_key_config.ron) for more info and examples.
+
+### Added
+* support for new-line in text-input (e.g. commit message editor) [[@pm100]](https://github/pm100) ([#1662](https://github.com/extrawurst/gitui/issues/1662)).
+* add syntax highlighting for blame view [[@tdtrung17693](https://github.com/tdtrung17693)] ([#745](https://github.com/extrawurst/gitui/issues/745))
+* allow aborting pending commit log search [[@StemCll](https://github.com/StemCll)] ([#1860](https://github.com/extrawurst/gitui/issues/1860))
+* `theme.ron` now supports customizing line break symbol ([#1894](https://github.com/extrawurst/gitui/issues/1894))
+* add confirmation for dialog for undo commit [[@TeFiLeDo](https://github.com/TeFiLeDo)] ([#1912](https://github.com/extrawurst/gitui/issues/1912))
+* support `prepare-commit-msg` hook ([#1873](https://github.com/extrawurst/gitui/issues/1873))
+* new style `block_title_focused` to allow customizing title text of focused frame/block ([#2052](https://github.com/extrawurst/gitui/issues/2052)).
+* allow `fetch` command in both tabs of branchlist popup ([#2067](https://github.com/extrawurst/gitui/issues/2067))
+* check branch name validity while typing [[@sainad2222](https://github.com/sainad2222)] ([#2062](https://github.com/extrawurst/gitui/issues/2062))
+
+### Changed
+* do not allow tagging when `tag.gpgsign` enabled until gpg-signing is [supported](https://github.com/extrawurst/gitui/issues/97) [[@TeFiLeDo](https://github.com/TeFiLeDo)] ([#1915](https://github.com/extrawurst/gitui/pull/1915))
+
+### Fixes
+* stash window empty after file history popup closes ([#1986](https://github.com/extrawurst/gitui/issues/1986))
+* allow push to empty remote ([#1919](https://github.com/extrawurst/gitui/issues/1919))
+* better diagnostics for theme file loading ([#2007](https://github.com/extrawurst/gitui/issues/2007))
+* fix ordering of commits in diff view [[@Joshix-1](https://github.com/Joshix-1)]([#1747](https://github.com/extrawurst/gitui/issues/1747))
+
+## [0.24.3] - 2023-09-09
+
+### Fixes
+* log: major lag when going beyond last search hit ([#1876](https://github.com/extrawurst/gitui/issues/1876))
+
+### Changed
+* parallelise log search - performance gain ~100% ([#1869](https://github.com/extrawurst/gitui/issues/1869))
+* search message body/summary separately ([#1875](https://github.com/extrawurst/gitui/issues/1875))
+
+## [0.24.2] - 2023-09-03
+
+### Fixes
+* fix commit log not updating after branch switch ([#1862](https://github.com/extrawurst/gitui/issues/1862))
+* fix stashlist not updating after pop/drop ([#1864](https://github.com/extrawurst/gitui/issues/1864))
+* fix commit log corruption when tabbing in/out while parsing log ([#1866](https://github.com/extrawurst/gitui/issues/1866))
+
+## [0.24.1] - 2023-08-30
+
+### Fixes
+* fix performance problem in big repo with a lot of incoming commits ([#1845](https://github.com/extrawurst/gitui/issues/1845))
+* fix error switching to a branch with '/' in the name ([#1851](https://github.com/extrawurst/gitui/issues/1851))
+
+## [0.24.0] - 2023-08-27
+
+**search commits**
+
+![commit-search](assets/log-search.gif)
+
+**visualize empty lines in diff better**
+
+![diff-empty-line](assets/diff-empty-line.png)
+
+### Breaking Changes
+* Do you use a custom theme?
+
+  The way themes work got changed and simplified ([see docs](https://github.com/extrawurst/gitui/blob/master/THEMES.md) for more info):
+
+  * The format of `theme.ron` has changed: you only specify the colors etc. that should differ from their default value
+  * Future additions of colors etc. will not break existing themes anymore
+
+### Added
+* search commits by message, author or files in diff ([#1791](https://github.com/extrawurst/gitui/issues/1791))
+* support 'n'/'p' key to move to the next/prev hunk in diff component [[@hamflx](https://github.com/hamflx)] ([#1523](https://github.com/extrawurst/gitui/issues/1523))
+* simplify theme overrides [[@cruessler](https://github.com/cruessler)] ([#1367](https://github.com/extrawurst/gitui/issues/1367))
+* support for sign-off of commits [[@domtac](https://github.com/domtac)]([#1757](https://github.com/extrawurst/gitui/issues/1757))
+* switched from textwrap to bwrap for text wrapping [[@TheBlackSheep3](https://github.com/TheBlackSheep3/)] ([#1762](https://github.com/extrawurst/gitui/issues/1762))
+* more logging diagnostics when a repo cannot be opened
+* added to [anaconda](https://anaconda.org/conda-forge/gitui) [[@TheBlackSheep3](https://github.com/TheBlackSheep3/)] ([#1626](https://github.com/extrawurst/gitui/issues/1626))
+* visualize empty line substituted with content in diff better ([#1359](https://github.com/extrawurst/gitui/issues/1359))
+* checkout branch works with non-empty status report [[@lightsnowball](https://github.com/lightsnowball)]  ([#1399](https://github.com/extrawurst/gitui/issues/1399))
+* jump to commit by SHA [[@AmmarAbouZor](https://github.com/AmmarAbouZor)] ([#1818](https://github.com/extrawurst/gitui/pull/1818))
+
+### Fixes
+* fix commit dialog char count for multibyte characters ([#1726](https://github.com/extrawurst/gitui/issues/1726))
+* fix wrong hit highlighting in fuzzy find popup [[@UUGTech](https://github.com/UUGTech)] ([#1731](https://github.com/extrawurst/gitui/pull/1731))
+* fix symlink support for configuration files [[@TheBlackSheep3](https://github.com/TheBlackSheep3)] ([#1751](https://github.com/extrawurst/gitui/issues/1751))
+* fix expansion of `~` in `commit.template` ([#1745](https://github.com/extrawurst/gitui/pull/1745))
+* fix hunk (un)staging/reset for # of context lines != 3 ([#1746](https://github.com/extrawurst/gitui/issues/1746))
+* fix delay when opening external editor ([#1506](https://github.com/extrawurst/gitui/issues/1506))
+
+### Changed
+* Copy full Commit Hash by default [[@AmmarAbouZor](https://github.com/AmmarAbouZor)] ([#1836](https://github.com/extrawurst/gitui/issues/1836))
+
+## [0.23.0] - 2023-06-19
+
+**reset to commit**
+
+![reset](assets/reset_in_log.gif)
+
+**reword commit**
+
+![reword](assets/reword.gif)
+
+**fuzzy find branch**
+
+![fuzzy-branch](assets/fuzzy-find-branch.gif)
+
+### Breaking Change
+* `focus_XYZ` key bindings are merged into the `move_XYZ` set, so only one way to bind arrow-like keys from now on ([#1539](https://github.com/extrawurst/gitui/issues/1539))
+
+### Added
+* allow reset (soft,mixed,hard) from commit log ([#1500](https://github.com/extrawurst/gitui/issues/1500))
+* support **reword** of commit from log ([#829](https://github.com/extrawurst/gitui/pull/829))
+* fuzzy find branch [[@UUGTech](https://github.com/UUGTech)] ([#1350](https://github.com/extrawurst/gitui/issues/1350))
+* list changes in commit message inside external editor [[@bc-universe]](https://github.com/bc-universe) ([#1420](https://github.com/extrawurst/gitui/issues/1420))
+* allow detaching HEAD and checking out specific commit from log view [[@fralcow]](https://github.com/fralcow) ([#1499](https://github.com/extrawurst/gitui/pull/1499))
+* add no-verify option on commits to not run hooks [[@dam5h]](https://github.com/dam5h) ([#1374](https://github.com/extrawurst/gitui/issues/1374))
+* allow `fetch` on status tab [[@alensiljak]](https://github.com/alensiljak) ([#1471](https://github.com/extrawurst/gitui/issues/1471))
+* allow `copy` file path on revision files and status tree [[@yanganto]](https://github.com/yanganto)  ([#1516](https://github.com/extrawurst/gitui/pull/1516))
+* print message of where log will be written if `-l` is set ([#1472](https://github.com/extrawurst/gitui/pull/1472))
+* show remote branches in log [[@cruessler](https://github.com/cruessler)] ([#1501](https://github.com/extrawurst/gitui/issues/1501))
+* scrolling functionality to fuzzy-find [[@AmmarAbouZor](https://github.com/AmmarAbouZor)] ([#1732](https://github.com/extrawurst/gitui/issues/1732))
+
+### Fixes
+* fixed side effect of crossterm 0.26 on windows that caused double input of all keys [[@pm100]](https://github/pm100) ([#1686](https://github.com/extrawurst/gitui/pull/1686))
+* commit msg history ordered the wrong way ([#1445](https://github.com/extrawurst/gitui/issues/1445))
+* improve help documentation for amend cmd ([#1448](https://github.com/extrawurst/gitui/issues/1448))
+* lag issue when showing files tab ([#1451](https://github.com/extrawurst/gitui/issues/1451))
+* fix key binding shown in bottom bar for `stash_open` ([#1454](https://github.com/extrawurst/gitui/issues/1454))
+* `--bugreport` does not require param ([#1466](https://github.com/extrawurst/gitui/issues/1466))
+* `edit`-file command shown on commits msg ([#1461](https://github.com/extrawurst/gitui/issues/1461))
+* crash on branches popup in small terminal ([#1470](https://github.com/extrawurst/gitui/issues/1470))
+* `edit` command duplication ([#1489](https://github.com/extrawurst/gitui/issues/1489))
+* syntax errors in `key_bindings.ron` will be logged ([#1491](https://github.com/extrawurst/gitui/issues/1491))
+* Fix UI freeze when copying with xclip installed on Linux ([#1497](https://github.com/extrawurst/gitui/issues/1497))
+* Fix UI freeze when copying with wl-copy installed on Linux ([#1497](https://github.com/extrawurst/gitui/issues/1497))
+* commit hooks report "command not found" on Windows with wsl2 installed ([#1528](https://github.com/extrawurst/gitui/issues/1528))
+* crashes on entering submodules ([#1510](https://github.com/extrawurst/gitui/issues/1510))
+* fix race issue: revlog messages sometimes appear empty ([#1473](https://github.com/extrawurst/gitui/issues/1473))
+* default to tick-based updates [[@cruessler](https://github.com/cruessler)] ([#1444](https://github.com/extrawurst/gitui/issues/1444))
+* add support for options handling in log and stashes views [[@kamillo](https://github.com/kamillo)] ([#1661](https://github.com/extrawurst/gitui/issues/1661))
+
+### Changed
+* minimum supported rust version bumped to 1.65 (thank you `time` crate)
+
+## [0.22.1] - 2022-11-22
+
+Bugfix followup release - check `0.22.0` notes for more infos!
+
+### Added
+* new arg `--polling` to use poll-based change detection and not filesystem watcher (use if you see problems running into file descriptor limits)
+
+### Fixes
+* improve performance by requesting branches info asynchronous ([92f63d1](https://github.com/extrawurst/gitui/commit/92f63d107c1dca1f10139668ff5b3ca752261b0f))
+* fix app startup delay due to using file watcher ([#1436](https://github.com/extrawurst/gitui/issues/1436))
+* make git tree file fetch async ([#734](https://github.com/extrawurst/gitui/issues/734))
+
+## [0.22.0] - 2022-11-19
+
+**submodules view**
+
+![submodules](assets/submodules.gif)
+
+**commit message history**
+
+![commit-history](assets/commit-msg-history.gif)
+
+### Added
+* submodules support ([#1087](https://github.com/extrawurst/gitui/issues/1087))
+* remember tab between app starts ([#1338](https://github.com/extrawurst/gitui/issues/1338))
+* repo specific gitui options saved in `.git/gitui.ron` ([#1340](https://github.com/extrawurst/gitui/issues/1340))
+* commit msg history ([#1345](https://github.com/extrawurst/gitui/issues/1345))
+* customizable `cmdbar_bg` theme color & screen spanning selected line bg [[@gigitsu](https://github.com/gigitsu)] ([#1299](https://github.com/extrawurst/gitui/pull/1299))
+* word motions to text input [[@Rodrigodd](https://github.com/Rodrigodd)] ([#1256](https://github.com/extrawurst/gitui/issues/1256))
+* file blame at right revision from commit-details [[@heiskane](https://github.com/heiskane)] ([#1122](https://github.com/extrawurst/gitui/issues/1122))
+* dedicated selection foreground theme color `selection_fg` ([#1365](https://github.com/extrawurst/gitui/issues/1365))
+* add `regex-fancy` and `regex-onig` features to allow building Syntect with Onigumara regex engine instead of the default engine based on fancy-regex [[@jirutka](https://github.com/jirutka)]
+* add `vendor-openssl` feature to allow building without vendored openssl [[@jirutka](https://github.com/jirutka)]
+* allow copying marked commits [[@remique](https://github.com/remique)] ([#1288](https://github.com/extrawurst/gitui/issues/1288))
+* feedback for success/failure of copying hash commit [[@sergioribera](https://github.com/sergioribera)]([#1160](https://github.com/extrawurst/gitui/issues/1160))
+* display tags and branches in the log view [[@alexmaco](https://github.com/alexmaco)] ([#1371](https://github.com/extrawurst/gitui/pull/1371))
+* display current repository path in the top-right corner [[@alexmaco](https://github.com/alexmaco)]([#1387](https://github.com/extrawurst/gitui/pull/1387))
+* add Linux targets for ARM, ARMv7 and AARCH64 [[@adur1990](https://github.com/adur1990)] ([#1419](https://github.com/extrawurst/gitui/pull/1419))
+* display commit description in file view [[@alexmaco](https://github.com/alexmaco)] ([#1380](https://github.com/extrawurst/gitui/pull/1380))
+* allow launching editor from Compare Commits view ([#1409](https://github.com/extrawurst/gitui/pull/1409))
+
+### Fixes
+* remove insecure dependency `ansi_term` ([#1290](https://github.com/extrawurst/gitui/issues/1290))
+* use filewatcher instead of polling updates ([#1](https://github.com/extrawurst/gitui/issues/1))
+
+## [0.21.0] - 2022-08-17
+
+**popup stacking**
+
+![popup-stacking](assets/popup-stacking.gif)
+
+**termux android support**
+
+![termux-android](assets/termux-android.jpg)
+
+### Added
+* stack popups ([#846](https://github.com/extrawurst/gitui/issues/846))
+* file history log [[@cruessler](https://github.com/cruessler)] ([#381](https://github.com/extrawurst/gitui/issues/381))
+* termux support on android [[@PeroSar](https://github.com/PeroSar)] ([#1139](https://github.com/extrawurst/gitui/issues/1139))
+* use `GIT_DIR` and `GIT_WORK_DIR` from environment if set ([#1191](https://github.com/extrawurst/gitui/pull/1191))
+* new [FAQ](./FAQ.md)s page
+* mention macports in install section [[@fs111](https://github.com/fs111)]([#1237](https://github.com/extrawurst/gitui/pull/1237))
+* support copy to clipboard on wayland [[@JayceFayne](https://github.com/JayceFayne)] ([#397](https://github.com/extrawurst/gitui/issues/397))
+
+### Fixed
+* opening tags list without remotes ([#1111](https://github.com/extrawurst/gitui/issues/1111))
+* tabs indentation in blame [[@fersilva16](https://github.com/fersilva16)] ([#1117](https://github.com/extrawurst/gitui/issues/1117))
+* switch focus to index after staging last file ([#1169](https://github.com/extrawurst/gitui/pull/1169))
+* fix stashlist multi marking not updated after dropping ([#1207](https://github.com/extrawurst/gitui/pull/1207))
+* exact matches have a higher priority and are placed to the top of the list when fuzzily finding files ([#1183](https://github.com/extrawurst/gitui/pull/1183))
+* support horizontal scrolling in diff view ([#1017](https://github.com/extrawurst/gitui/issues/1017))
+
+### Changed
+* minimum supported rust version bumped to 1.60 ([#1279](https://github.com/extrawurst/gitui/pull/1279))
+
+## [0.20.1] - 2022-01-26
+
+This is was a immediate followup patch release to `0.20` see [release notes](https://github.com/extrawurst/gitui/releases/tag/v0.20.0) for the whole list of goodies in `0.20`.
+
+### Added
+* support proxy auto detection via env's like `HTTP_PROXY` ([#994](https://github.com/extrawurst/gitui/issues/994))
+
+### Fixed
+* severe performance regression in `0.20` ([#1102](https://github.com/extrawurst/gitui/issues/1102))
+* several smaller performance improvements via caching ([#1104](https://github.com/extrawurst/gitui/issues/1104))
+* windows release deployment via CD broken
+
+## [0.20] - 2022-01-25 - Tag Annotations
+
+**support tag annotations**
+
+![tag-annotation](assets/tag-annotation.gif)
+
+**delete tag on remote**
+
+![delete-tag-remote](assets/delete-tag-remote.gif)
+
+**revert commit from rev log**
+
+![revert-commit](assets/revert-commit.gif)
+
+### Added
+- support `core.hooksPath` ([#1044](https://github.com/extrawurst/gitui/issues/1044))
+- allow reverting a commit from the commit log ([#927](https://github.com/extrawurst/gitui/issues/927))
+- disable pull cmd on local-only branches ([#1047](https://github.com/extrawurst/gitui/issues/1047))
+- support adding annotations to tags ([#747](https://github.com/extrawurst/gitui/issues/747))
+- support inspecting annotation of tag ([#1076](https://github.com/extrawurst/gitui/issues/1076))
+- support deleting tag on remote ([#1074](https://github.com/extrawurst/gitui/issues/1074))
+- support git credentials helper (https) ([#800](https://github.com/extrawurst/gitui/issues/800))
+
+### Fixed
+- Keep commit message when pre-commit hook fails ([#1035](https://github.com/extrawurst/gitui/issues/1035))
+- honor `pushurl` when checking credentials for pushing ([#953](https://github.com/extrawurst/gitui/issues/953))
+- use git-path instead of workdir finding hooks ([#1046](https://github.com/extrawurst/gitui/issues/1046))
+- only enable remote actions (fetch/pull/push) if there are remote branches ([#1047](https://github.com/extrawurst/gitui/issues/1047))
+
+### Key binding notes
+- added `gg`/`G` vim bindings to `vim_style_key_config.ron` ([#1039](https://github.com/extrawurst/gitui/issues/1039))
+
+## [0.19] - 2021-12-08 - Bare Repo Support
+
 **finder highlighting matches**
 
 ![fuzzy-find](assets/fuzzy-find-matches.gif)
 
 ### Breaking Change
 Have you used `key_config.ron` for custom key bindings before?
-The way this works got changed and simplified ([See docs](https://github.com/extrawurst/gitui/blob/master/KEY_CONFIG.md) for more info): 
+The way this works got changed and simplified ([See docs](https://github.com/extrawurst/gitui/blob/master/KEY_CONFIG.md) for more info):
 * You only define the keys that should differ from the default.
 * The file is renamed to `key_bindings.ron`
 * Future addition of new keys will not break anymore
@@ -28,11 +407,15 @@ The way this works got changed and simplified ([See docs](https://github.com/ext
 - allow customizing key symbols like `⏎` & `⇧` ([see docs](https://github.com/extrawurst/gitui/blob/master/KEY_CONFIG.md#key-symbols)) ([#465](https://github.com/extrawurst/gitui/issues/465))
 - simplify key overrides ([see docs](https://github.com/extrawurst/gitui/blob/master/KEY_CONFIG.md)) ([#946](https://github.com/extrawurst/gitui/issues/946))
 - dedicated fuzzy finder up/down keys to allow vim overrides ([#993](https://github.com/extrawurst/gitui/pull/993))
+- pull will also download tags ([#1013](https://github.com/extrawurst/gitui/pull/1013))
+- allow editing file from filetree ([#989](https://github.com/extrawurst/gitui/pull/989))
+- support bare repos (new `workdir` argument) ([#1026](https://github.com/extrawurst/gitui/pull/1026))
 
 ### Fixed
 - honor options (for untracked files) in `stage_all` command ([#933](https://github.com/extrawurst/gitui/issues/933))
 - improved file diff speed dramatically ([#976](https://github.com/extrawurst/gitui/issues/976))
 - blaming files in sub-folders on windows ([#981](https://github.com/extrawurst/gitui/issues/981))
+- push failing due to tracing error in upstream ([#881](https://github.com/extrawurst/gitui/issues/881))
 
 ## [0.18] - 2021-10-11
 
@@ -143,7 +526,7 @@ see `vim_style_key_config.ron` for their default vim binding
 - indicator for longer commit message than displayed ([#773](https://github.com/extrawurst/gitui/issues/773))
 
 ![msg-len](assets/long-msg-indicator.gif)
-  
+
 ### Fixed
 - wrong file with same name shown in file tree ([#748](https://github.com/extrawurst/gitui/issues/748))
 - filetree collapsing broken on windows ([#761](https://github.com/extrawurst/gitui/issues/761))
@@ -179,7 +562,7 @@ see `vim_style_key_config.ron` for their default vim binding
 - `--bugreport` cmd line arg to help diagnostics [[@zcorniere](https://github.com/zcorniere)] ([#695](https://github.com/extrawurst/gitui/issues/695))
 
 ### Changed
-- smarter log timestamps ([#682](https://github.com/extrawurst/gitui/issues/682)) 
+- smarter log timestamps ([#682](https://github.com/extrawurst/gitui/issues/682))
 - create-branch popup aligned with rename-branch [[@bruceCoelho](https://github.com/bruceCoelho)] ([#679](https://github.com/extrawurst/gitui/issues/679))
 - smart focus change after staging all files ([#706](https://github.com/extrawurst/gitui/issues/706))
 - do not allow to commit when `gpgsign` enabled ([#740](https://github.com/extrawurst/gitui/issues/740))
@@ -266,13 +649,13 @@ Thanks for your interest and support over this year! Read more about the 1 year 
 ![chars-branch-name](assets/chars_and_branchname.gif)
 
 ### Breaking Change
-- MacOS config directory now uses `~/.config/gitui` [[@remique](https://github.com/remique)] ([#317](https://github.com/extrawurst/gitui/issues/317)) 
+- MacOS config directory now uses `~/.config/gitui` [[@remique](https://github.com/remique)] ([#317](https://github.com/extrawurst/gitui/issues/317))
 
 ### Added
 - support for pull (fetch + simple merging) ([#319](https://github.com/extrawurst/gitui/issues/319))
 - show used char count in input texts ([#466](https://github.com/extrawurst/gitui/issues/466))
 - support smoother left/right toggle/keys for commit details ([#418](https://github.com/extrawurst/gitui/issues/418))
-- support *force push* command [[@WizardOhio24](https://github.com/WizardOhio24)] ([#274](https://github.com/extrawurst/gitui/issues/274)) 
+- support *force push* command [[@WizardOhio24](https://github.com/WizardOhio24)] ([#274](https://github.com/extrawurst/gitui/issues/274))
 
 ### Fixed
 - don't close branchlist every time ([#550](https://github.com/extrawurst/gitui/issues/550))
@@ -376,7 +759,7 @@ Thanks for your interest and support over this year! Read more about the 1 year 
 - min size for relative popups on small terminals ([#179](https://github.com/extrawurst/gitui/issues/179))
 - fix crash on resizing terminal to very small width ([#198](https://github.com/extrawurst/gitui/issues/198))
 - fix broken tags when using a different internal representation ([#206](https://github.com/extrawurst/gitui/issues/206))
-- tags are not cleanly seperated in details view ([#212](https://github.com/extrawurst/gitui/issues/212))
+- tags are not cleanly separated in details view ([#212](https://github.com/extrawurst/gitui/issues/212))
 
 ## [0.8.1] - 2020-07-07
 
@@ -402,7 +785,7 @@ Thanks for your interest and support over this year! Read more about the 1 year 
 
 ![](assets/binary_diff.png)
 
-- external editor support for commit messages [[@jonstodle](https://github.com/jonstodle)](<[#46](https://github.com/extrawurst/gitui/issues/46)>)
+- external editor support for commit messages [[@jonstodle](https://github.com/jonstodle)]([#46](https://github.com/extrawurst/gitui/issues/46))
 
 ![](assets/vi_support.gif)
 
@@ -542,7 +925,7 @@ Thanks for your interest and support over this year! Read more about the 1 year 
 ### Changed
 
 - show longer commit messages in log view
-- introduce propper error handling in `asyncgit` [[@MCord](https://github.com/MCord)]([#53](https://github.com/extrawurst/gitui/issues/53))
+- introduce proper error handling in `asyncgit` [[@MCord](https://github.com/MCord)]([#53](https://github.com/extrawurst/gitui/issues/53))
 - better error message when trying to run outside of a valid git repo ([#56](https://github.com/extrawurst/gitui/issues/56))
 - improve ctrl+c handling so it is checked first and no component needs to worry of blocking it
 

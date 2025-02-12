@@ -1,5 +1,7 @@
-use super::utils::repo;
-use crate::error::Result;
+use std::fmt::Display;
+
+use super::RepoPath;
+use crate::{error::Result, sync::repository::repo};
 use git2::{Commit, Error, Oid};
 use scopetime::scope_time;
 use unicode_truncate::UnicodeTruncateStr;
@@ -9,6 +11,12 @@ use unicode_truncate::UnicodeTruncateStr;
 	Debug, Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd,
 )]
 pub struct CommitId(Oid);
+
+impl Default for CommitId {
+	fn default() -> Self {
+		Self(Oid::zero())
+	}
+}
 
 impl CommitId {
 	/// create new `CommitId`
@@ -25,13 +33,27 @@ impl CommitId {
 	pub fn get_short_string(&self) -> String {
 		self.to_string().chars().take(7).collect()
 	}
+
+	/// Tries to retrieve the `CommitId` form the revision if exists in the given repository
+	pub fn from_revision(
+		repo_path: &RepoPath,
+		revision: &str,
+	) -> Result<Self> {
+		scope_time!("CommitId::from_revision");
+
+		let repo = repo(repo_path)?;
+
+		let commit_obj = repo.revparse_single(revision)?;
+		Ok(commit_obj.id().into())
+	}
 }
 
-//TODO: remove once clippy fixed: https://github.com/rust-lang/rust-clippy/issues/6983
-#[allow(clippy::wrong_self_convention)]
-impl ToString for CommitId {
-	fn to_string(&self) -> String {
-		self.0.to_string()
+impl Display for CommitId {
+	fn fmt(
+		&self,
+		f: &mut std::fmt::Formatter<'_>,
+	) -> std::fmt::Result {
+		write!(f, "{}", self.0)
 	}
 }
 
@@ -62,7 +84,7 @@ pub struct CommitInfo {
 
 ///
 pub fn get_commits_info(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	ids: &[CommitId],
 	message_length_limit: usize,
 ) -> Result<Vec<CommitInfo>> {
@@ -97,7 +119,7 @@ pub fn get_commits_info(
 
 ///
 pub fn get_commit_info(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	commit_id: &CommitId,
 ) -> Result<CommitInfo> {
 	scope_time!("get_commit_info");
@@ -136,10 +158,12 @@ pub fn get_message(
 #[cfg(test)]
 mod tests {
 	use super::get_commits_info;
-	use crate::error::Result;
-	use crate::sync::{
-		commit, stage_add_file, tests::repo_init_empty,
-		utils::get_head_repo,
+	use crate::{
+		error::Result,
+		sync::{
+			commit, stage_add_file, tests::repo_init_empty,
+			utils::get_head_repo, CommitId, RepoPath,
+		},
 	};
 	use std::{fs::File, io::Write, path::Path};
 
@@ -148,17 +172,17 @@ mod tests {
 		let file_path = Path::new("foo");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		let c1 = commit(repo_path, "commit1").unwrap();
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		let c2 = commit(repo_path, "commit2").unwrap();
 
-		let res =
-			get_commits_info(repo_path, &vec![c2, c1], 50).unwrap();
+		let res = get_commits_info(repo_path, &[c2, c1], 50).unwrap();
 
 		assert_eq!(res.len(), 2);
 		assert_eq!(res[0].message.as_str(), "commit2");
@@ -173,13 +197,14 @@ mod tests {
 		let file_path = Path::new("foo");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 		let c1 = commit(repo_path, "subject\nbody").unwrap();
 
-		let res = get_commits_info(repo_path, &vec![c1], 50).unwrap();
+		let res = get_commits_info(repo_path, &[c1], 50).unwrap();
 
 		assert_eq!(res.len(), 1);
 		assert_eq!(res[0].message.as_str(), "subject");
@@ -192,9 +217,10 @@ mod tests {
 		let file_path = Path::new("foo");
 		let (_td, repo) = repo_init_empty().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
-		File::create(&root.join(file_path))?.write_all(b"a")?;
+		File::create(root.join(file_path))?.write_all(b"a")?;
 		stage_add_file(repo_path, file_path).unwrap();
 
 		let msg = invalidstring::invalid_utf8("test msg");
@@ -202,14 +228,42 @@ mod tests {
 
 		let res = get_commits_info(
 			repo_path,
-			&vec![get_head_repo(&repo).unwrap().into()],
+			&[get_head_repo(&repo).unwrap()],
 			50,
 		)
 		.unwrap();
 
 		assert_eq!(res.len(), 1);
 		dbg!(&res[0].message);
-		assert_eq!(res[0].message.starts_with("test msg"), true);
+		assert!(res[0].message.starts_with("test msg"));
+
+		Ok(())
+	}
+
+	#[test]
+	fn test_get_commit_from_revision() -> Result<()> {
+		let (_td, repo) = repo_init_empty().unwrap();
+		let root = repo.path().parent().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
+
+		let foo_file = Path::new("foo");
+		File::create(root.join(foo_file))?.write_all(b"a")?;
+		stage_add_file(repo_path, foo_file).unwrap();
+		let c1 = commit(repo_path, "subject: foo\nbody").unwrap();
+		let c1_rev = c1.get_short_string();
+
+		assert_eq!(
+			CommitId::from_revision(repo_path, c1_rev.as_str())
+				.unwrap(),
+			c1
+		);
+
+		const FOREIGN_HASH: &str =
+			"d6d7d55cb6e4ba7301d6a11a657aab4211e5777e";
+		assert!(
+			CommitId::from_revision(repo_path, FOREIGN_HASH).is_err()
+		);
 
 		Ok(())
 	}

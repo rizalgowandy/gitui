@@ -1,4 +1,5 @@
 use crate::{
+	app::Environment,
 	components::{
 		commit_details::style::style_detail,
 		dialog_paragraph,
@@ -6,32 +7,30 @@ use crate::{
 		CommandBlocking, CommandInfo, Component, DrawableComponent,
 		EventState, ScrollType,
 	},
-	keys::SharedKeyConfig,
+	keys::{key_match, SharedKeyConfig},
 	strings::{self, order},
 	ui::style::SharedTheme,
 };
 use anyhow::Result;
-use asyncgit::{
-	sync::{self, CommitDetails, CommitId, CommitMessage},
-	CWD,
+use asyncgit::sync::{
+	self, CommitDetails, CommitId, CommitMessage, RepoPathRef, Tag,
 };
 use crossterm::event::Event;
-use std::clone::Clone;
-use std::{borrow::Cow, cell::Cell};
-use sync::CommitTags;
-use tui::{
-	backend::Backend,
+use ratatui::{
 	layout::{Constraint, Direction, Layout, Rect},
 	style::{Modifier, Style},
-	text::{Span, Spans, Text},
+	text::{Line, Span, Text},
 	Frame,
 };
+use std::{borrow::Cow, cell::Cell};
+use sync::CommitTags;
 
 use super::style::Detail;
 
 pub struct DetailsComponent {
+	repo: RepoPathRef,
 	data: Option<CommitDetails>,
-	tags: Vec<String>,
+	tags: Vec<Tag>,
 	theme: SharedTheme,
 	focused: bool,
 	current_width: Cell<u16>,
@@ -45,20 +44,17 @@ type WrappedCommitMessage<'a> =
 
 impl DetailsComponent {
 	///
-	pub const fn new(
-		theme: SharedTheme,
-		key_config: SharedKeyConfig,
-		focused: bool,
-	) -> Self {
+	pub fn new(env: &Environment, focused: bool) -> Self {
 		Self {
+			repo: env.repo.clone(),
 			data: None,
 			tags: Vec::new(),
-			theme,
+			theme: env.theme.clone(),
 			focused,
 			scroll_to_bottom_next_draw: Cell::new(false),
 			current_width: Cell::new(0),
 			scroll: VerticalScroll::new(),
-			key_config,
+			key_config: env.key_config.clone(),
 		}
 	}
 
@@ -69,8 +65,9 @@ impl DetailsComponent {
 	) {
 		self.tags.clear();
 
-		self.data =
-			id.and_then(|id| sync::get_commit_details(CWD, id).ok());
+		self.data = id.and_then(|id| {
+			sync::get_commit_details(&self.repo.borrow(), id).ok()
+		});
 
 		self.scroll.reset();
 
@@ -83,11 +80,20 @@ impl DetailsComponent {
 		message: &CommitMessage,
 		width: usize,
 	) -> WrappedCommitMessage<'_> {
-		let wrapped_title = textwrap::wrap(&message.subject, width);
+		let width = width.max(1);
+		let wrapped_title = bwrap::wrap!(&message.subject, width)
+			.lines()
+			.map(String::from)
+			.map(Cow::from)
+			.collect();
 
 		if let Some(ref body) = message.body {
 			let wrapped_message: Vec<Cow<'_, str>> =
-				textwrap::wrap(body, width).into_iter().collect();
+				bwrap::wrap!(body, width)
+					.lines()
+					.map(String::from)
+					.map(Cow::from)
+					.collect();
 
 			(wrapped_title, wrapped_message)
 		} else {
@@ -96,11 +102,11 @@ impl DetailsComponent {
 	}
 
 	fn get_wrapped_lines(
-		data: &Option<CommitDetails>,
+		data: Option<&CommitDetails>,
 		width: usize,
 	) -> WrappedCommitMessage<'_> {
-		if let Some(ref data) = data {
-			if let Some(ref message) = data.message {
+		if let Some(data) = data {
+			if let Some(message) = &data.message {
 				return Self::wrap_commit_details(message, width);
 			}
 		}
@@ -109,7 +115,7 @@ impl DetailsComponent {
 	}
 
 	fn get_number_of_lines(
-		details: &Option<CommitDetails>,
+		details: Option<&CommitDetails>,
 		width: usize,
 	) -> usize {
 		let (wrapped_title, wrapped_message) =
@@ -130,9 +136,9 @@ impl DetailsComponent {
 		&self,
 		width: usize,
 		height: usize,
-	) -> Vec<Spans> {
+	) -> Vec<Line> {
 		let (wrapped_title, wrapped_message) =
-			Self::get_wrapped_lines(&self.data, width);
+			Self::get_wrapped_lines(self.data.as_ref(), width);
 
 		[&wrapped_title[..], &wrapped_message[..]]
 			.concat()
@@ -141,7 +147,7 @@ impl DetailsComponent {
 			.skip(self.scroll.get_top())
 			.take(height)
 			.map(|(i, line)| {
-				Spans::from(vec![Span::styled(
+				Line::from(vec![Span::styled(
 					line.clone(),
 					self.get_theme_for_line(i < wrapped_title.len()),
 				)])
@@ -150,10 +156,10 @@ impl DetailsComponent {
 	}
 
 	#[allow(unstable_name_collisions, clippy::too_many_lines)]
-	fn get_text_info(&self) -> Vec<Spans> {
+	fn get_text_info(&self) -> Vec<Line> {
 		self.data.as_ref().map_or_else(Vec::new, |data| {
 			let mut res = vec![
-				Spans::from(vec![
+				Line::from(vec![
 					style_detail(&self.theme, &Detail::Author),
 					Span::styled(
 						Cow::from(format!(
@@ -163,7 +169,7 @@ impl DetailsComponent {
 						self.theme.text(true, false),
 					),
 				]),
-				Spans::from(vec![
+				Line::from(vec![
 					style_detail(&self.theme, &Detail::Date),
 					Span::styled(
 						Cow::from(time_to_string(
@@ -177,8 +183,8 @@ impl DetailsComponent {
 
 			if let Some(ref committer) = data.committer {
 				res.extend(vec![
-					Spans::from(vec![
-						style_detail(&self.theme, &Detail::Commiter),
+					Line::from(vec![
+						style_detail(&self.theme, &Detail::Committer),
 						Span::styled(
 							Cow::from(format!(
 								"{} <{}>",
@@ -187,7 +193,7 @@ impl DetailsComponent {
 							self.theme.text(true, false),
 						),
 					]),
-					Spans::from(vec![
+					Line::from(vec![
 						style_detail(&self.theme, &Detail::Date),
 						Span::styled(
 							Cow::from(time_to_string(
@@ -200,7 +206,7 @@ impl DetailsComponent {
 				]);
 			}
 
-			res.push(Spans::from(vec![
+			res.push(Line::from(vec![
 				Span::styled(
 					Cow::from(strings::commit::details_sha()),
 					self.theme.text(false, false),
@@ -212,16 +218,16 @@ impl DetailsComponent {
 			]));
 
 			if !self.tags.is_empty() {
-				res.push(Spans::from(style_detail(
+				res.push(Line::from(style_detail(
 					&self.theme,
 					&Detail::Sha,
 				)));
 
-				res.push(Spans::from(
+				res.push(Line::from(
 					itertools::Itertools::intersperse(
 						self.tags.iter().map(|tag| {
 							Span::styled(
-								Cow::from(tag),
+								Cow::from(&tag.name),
 								self.theme.text(true, false),
 							)
 						}),
@@ -238,7 +244,7 @@ impl DetailsComponent {
 		})
 	}
 
-	fn move_scroll_top(&mut self, move_type: ScrollType) -> bool {
+	fn move_scroll_top(&self, move_type: ScrollType) -> bool {
 		if self.data.is_some() {
 			self.scroll.move_top(move_type)
 		} else {
@@ -248,11 +254,7 @@ impl DetailsComponent {
 }
 
 impl DrawableComponent for DetailsComponent {
-	fn draw<B: Backend>(
-		&self,
-		f: &mut Frame<B>,
-		rect: Rect,
-	) -> Result<()> {
+	fn draw(&self, f: &mut Frame, rect: Rect) -> Result<()> {
 		const CANSCROLL_STRING: &str = "[\u{2026}]";
 		const EMPTY_STRING: &str = "";
 
@@ -284,8 +286,10 @@ impl DrawableComponent for DetailsComponent {
 
 		self.current_width.set(width);
 
-		let number_of_lines =
-			Self::get_number_of_lines(&self.data, usize::from(width));
+		let number_of_lines = Self::get_number_of_lines(
+			self.data.as_ref(),
+			usize::from(width),
+		);
 
 		self.scroll.update_no_selection(
 			number_of_lines,
@@ -338,7 +342,7 @@ impl Component for DetailsComponent {
 	) -> CommandBlocking {
 		let width = usize::from(self.current_width.get());
 		let number_of_lines =
-			Self::get_number_of_lines(&self.data, width);
+			Self::get_number_of_lines(self.data.as_ref(), width);
 
 		out.push(
 			CommandInfo::new(
@@ -354,24 +358,31 @@ impl Component for DetailsComponent {
 		CommandBlocking::PassingOn
 	}
 
-	fn event(&mut self, event: Event) -> Result<EventState> {
+	fn event(&mut self, event: &Event) -> Result<EventState> {
 		if self.focused {
 			if let Event::Key(e) = event {
-				return Ok(if e == self.key_config.keys.move_up {
-					self.move_scroll_top(ScrollType::Up).into()
-				} else if e == self.key_config.keys.move_down {
-					self.move_scroll_top(ScrollType::Down).into()
-				} else if e == self.key_config.keys.home
-					|| e == self.key_config.keys.shift_up
-				{
-					self.move_scroll_top(ScrollType::Home).into()
-				} else if e == self.key_config.keys.end
-					|| e == self.key_config.keys.shift_down
-				{
-					self.move_scroll_top(ScrollType::End).into()
-				} else {
-					EventState::NotConsumed
-				});
+				return Ok(
+					if key_match(e, self.key_config.keys.move_up) {
+						self.move_scroll_top(ScrollType::Up).into()
+					} else if key_match(
+						e,
+						self.key_config.keys.move_down,
+					) {
+						self.move_scroll_top(ScrollType::Down).into()
+					} else if key_match(e, self.key_config.keys.home)
+						|| key_match(e, self.key_config.keys.shift_up)
+					{
+						self.move_scroll_top(ScrollType::Home).into()
+					} else if key_match(e, self.key_config.keys.end)
+						|| key_match(
+							e,
+							self.key_config.keys.shift_down,
+						) {
+						self.move_scroll_top(ScrollType::End).into()
+					} else {
+						EventState::NotConsumed
+					},
+				);
 			}
 		}
 
@@ -419,6 +430,10 @@ mod tests {
 			get_wrapped_lines(&message, 14),
 			vec!["Commit message"]
 		);
+		assert_eq!(
+			get_wrapped_lines(&message, 0),
+			vec!["Commit", "message"]
+		);
 
 		let message_with_newline =
 			CommitMessage::from("Commit message\n");
@@ -430,6 +445,10 @@ mod tests {
 		assert_eq!(
 			get_wrapped_lines(&message_with_newline, 14),
 			vec!["Commit message"]
+		);
+		assert_eq!(
+			get_wrapped_lines(&message, 0),
+			vec!["Commit", "message"]
 		);
 
 		let message_with_body = CommitMessage::from(
@@ -446,6 +465,13 @@ mod tests {
 		assert_eq!(
 			get_wrapped_lines(&message_with_body, 14),
 			vec!["Commit message", "First line", "Second line"]
+		);
+		assert_eq!(
+			get_wrapped_lines(&message_with_body, 7),
+			vec![
+				"Commit", "message", "First", "line", "Second",
+				"line"
+			]
 		);
 	}
 }
@@ -464,13 +490,15 @@ mod test_line_count {
 			..CommitDetails::default()
 		};
 		let lines = DetailsComponent::get_number_of_lines(
-			&Some(commit.clone()),
+			Some(commit.clone()).as_ref(),
 			50,
 		);
 		assert_eq!(lines, 2);
 
-		let lines =
-			DetailsComponent::get_number_of_lines(&Some(commit), 8);
+		let lines = DetailsComponent::get_number_of_lines(
+			Some(commit).as_ref(),
+			8,
+		);
 		assert_eq!(lines, 4);
 	}
 }

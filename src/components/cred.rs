@@ -1,10 +1,12 @@
 use anyhow::Result;
 use crossterm::event::Event;
-use tui::{backend::Backend, layout::Rect, Frame};
+use ratatui::{layout::Rect, Frame};
 
 use asyncgit::sync::cred::BasicAuthCredential;
 
+use crate::app::Environment;
 use crate::components::{EventState, InputType, TextInputComponent};
+use crate::keys::key_match;
 use crate::{
 	components::{
 		visibility_blocking, CommandBlocking, CommandInfo, Component,
@@ -12,7 +14,6 @@ use crate::{
 	},
 	keys::SharedKeyConfig,
 	strings,
-	ui::style::SharedTheme,
 };
 
 ///
@@ -26,23 +27,19 @@ pub struct CredComponent {
 
 impl CredComponent {
 	///
-	pub fn new(
-		theme: SharedTheme,
-		key_config: SharedKeyConfig,
-	) -> Self {
+	pub fn new(env: &Environment) -> Self {
+		let key_config = env.key_config.clone();
 		Self {
 			visible: false,
 			input_username: TextInputComponent::new(
-				theme.clone(),
-				key_config.clone(),
+				env,
 				&strings::username_popup_title(&key_config),
 				&strings::username_popup_msg(&key_config),
 				false,
 			)
 			.with_input_type(InputType::Singleline),
 			input_password: TextInputComponent::new(
-				theme,
-				key_config.clone(),
+				env,
 				&strings::password_popup_title(&key_config),
 				&strings::password_popup_msg(&key_config),
 				false,
@@ -63,11 +60,7 @@ impl CredComponent {
 }
 
 impl DrawableComponent for CredComponent {
-	fn draw<B: Backend>(
-		&self,
-		f: &mut Frame<B>,
-		rect: Rect,
-	) -> Result<()> {
+	fn draw(&self, f: &mut Frame, rect: Rect) -> Result<()> {
 		if self.visible {
 			self.input_username.draw(f, rect)?;
 			self.input_password.draw(f, rect)?;
@@ -102,10 +95,10 @@ impl Component for CredComponent {
 		visibility_blocking(self)
 	}
 
-	fn event(&mut self, ev: Event) -> Result<EventState> {
+	fn event(&mut self, ev: &Event) -> Result<EventState> {
 		if self.visible {
 			if let Event::Key(e) = ev {
-				if e == self.key_config.keys.exit_popup {
+				if key_match(e, self.key_config.keys.exit_popup) {
 					self.hide();
 					return Ok(EventState::Consumed);
 				}
@@ -113,7 +106,7 @@ impl Component for CredComponent {
 					|| self.input_password.event(ev)?.is_consumed()
 				{
 					return Ok(EventState::Consumed);
-				} else if e == self.key_config.keys.enter {
+				} else if key_match(e, self.key_config.keys.enter) {
 					if self.input_username.is_visible() {
 						self.cred = BasicAuthCredential::new(
 							Some(

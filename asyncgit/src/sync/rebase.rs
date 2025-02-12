@@ -3,20 +3,20 @@ use scopetime::scope_time;
 
 use crate::{
 	error::{Error, Result},
-	sync::utils,
+	sync::repository::repo,
 };
 
-use super::CommitId;
+use super::{CommitId, RepoPath};
 
 /// rebase current HEAD on `branch`
 pub fn rebase_branch(
-	repo_path: &str,
+	repo_path: &RepoPath,
 	branch: &str,
 	branch_type: BranchType,
 ) -> Result<RebaseState> {
 	scope_time!("rebase_branch");
 
-	let repo = utils::repo(repo_path)?;
+	let repo = repo(repo_path)?;
 
 	rebase_branch_repo(&repo, branch, branch_type)
 }
@@ -69,7 +69,7 @@ pub fn conflict_free_rebase(
 }
 
 ///
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum RebaseState {
 	///
 	Finished,
@@ -144,7 +144,7 @@ pub fn continue_rebase(
 }
 
 ///
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct RebaseProgress {
 	///
 	pub steps: usize,
@@ -189,8 +189,9 @@ mod test_conflict_free_rebase {
 		checkout_branch, create_branch,
 		rebase::{rebase_branch, RebaseState},
 		repo_state,
+		repository::repo,
 		tests::{repo_init, write_commit_file},
-		utils, CommitId, RepoState,
+		CommitId, RepoPath, RepoState,
 	};
 	use git2::{BranchType, Repository};
 
@@ -201,7 +202,7 @@ mod test_conflict_free_rebase {
 			.find_commit(c.into())
 			.unwrap()
 			.parent_ids()
-			.map(|id| CommitId::from(id))
+			.map(CommitId::from)
 			.collect();
 
 		foo
@@ -209,10 +210,10 @@ mod test_conflict_free_rebase {
 
 	///
 	fn test_rebase_branch_repo(
-		repo_path: &str,
+		repo_path: &RepoPath,
 		branch_name: &str,
 	) -> CommitId {
-		let repo = utils::repo(repo_path).unwrap();
+		let repo = repo(repo_path).unwrap();
 
 		let branch =
 			repo.find_branch(branch_name, BranchType::Local).unwrap();
@@ -228,7 +229,8 @@ mod test_conflict_free_rebase {
 	fn test_smoke() {
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		let c1 =
 			write_commit_file(&repo, "test1.txt", "test", "commit1");
@@ -240,12 +242,12 @@ mod test_conflict_free_rebase {
 
 		assert_eq!(parent_ids(&repo, c2), vec![c1]);
 
-		checkout_branch(repo_path, "refs/heads/master").unwrap();
+		checkout_branch(repo_path, "master").unwrap();
 
 		let c3 =
 			write_commit_file(&repo, "test3.txt", "test", "commit3");
 
-		checkout_branch(repo_path, "refs/heads/foo").unwrap();
+		checkout_branch(repo_path, "foo").unwrap();
 
 		let r = test_rebase_branch_repo(repo_path, "master");
 
@@ -256,7 +258,8 @@ mod test_conflict_free_rebase {
 	fn test_conflict() {
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		write_commit_file(&repo, "test.txt", "test1", "commit1");
 
@@ -264,11 +267,11 @@ mod test_conflict_free_rebase {
 
 		write_commit_file(&repo, "test.txt", "test2", "commit2");
 
-		checkout_branch(repo_path, "refs/heads/master").unwrap();
+		checkout_branch(repo_path, "master").unwrap();
 
 		write_commit_file(&repo, "test.txt", "test3", "commit3");
 
-		checkout_branch(repo_path, "refs/heads/foo").unwrap();
+		checkout_branch(repo_path, "foo").unwrap();
 
 		let res =
 			rebase_branch(repo_path, "master", BranchType::Local);
@@ -289,7 +292,7 @@ mod test_rebase {
 		},
 		rebase_branch, repo_state,
 		tests::{repo_init, write_commit_file},
-		RepoState,
+		RepoPath, RepoState,
 	};
 	use git2::BranchType;
 
@@ -297,7 +300,8 @@ mod test_rebase {
 	fn test_conflicted_abort() {
 		let (_td, repo) = repo_init().unwrap();
 		let root = repo.path().parent().unwrap();
-		let repo_path = root.as_os_str().to_str().unwrap();
+		let repo_path: &RepoPath =
+			&root.as_os_str().to_str().unwrap().into();
 
 		write_commit_file(&repo, "test.txt", "test1", "commit1");
 
@@ -306,11 +310,11 @@ mod test_rebase {
 		let c =
 			write_commit_file(&repo, "test.txt", "test2", "commit2");
 
-		checkout_branch(repo_path, "refs/heads/master").unwrap();
+		checkout_branch(repo_path, "master").unwrap();
 
 		write_commit_file(&repo, "test.txt", "test3", "commit3");
 
-		checkout_branch(repo_path, "refs/heads/foo").unwrap();
+		checkout_branch(repo_path, "foo").unwrap();
 
 		assert!(get_rebase_progress(&repo).is_err());
 

@@ -1,8 +1,8 @@
 use crate::{
 	error::Result,
 	hash,
-	sync::{self, FileBlame},
-	AsyncGitNotification, CWD,
+	sync::{self, CommitId, FileBlame, RepoPath},
+	AsyncGitNotification,
 };
 use crossbeam_channel::Sender;
 use std::{
@@ -14,10 +14,12 @@ use std::{
 };
 
 ///
-#[derive(Hash, Clone, PartialEq)]
+#[derive(Hash, Clone, PartialEq, Eq)]
 pub struct BlameParams {
 	/// path to the file to blame
 	pub file_path: String,
+	/// blame at a specific revision
+	pub commit_id: Option<CommitId>,
 }
 
 struct Request<R, A>(R, Option<A>);
@@ -34,12 +36,17 @@ pub struct AsyncBlame {
 	last: Arc<Mutex<Option<LastResult<BlameParams, FileBlame>>>>,
 	sender: Sender<AsyncGitNotification>,
 	pending: Arc<AtomicUsize>,
+	repo: RepoPath,
 }
 
 impl AsyncBlame {
 	///
-	pub fn new(sender: &Sender<AsyncGitNotification>) -> Self {
+	pub fn new(
+		repo: RepoPath,
+		sender: &Sender<AsyncGitNotification>,
+	) -> Self {
 		Self {
+			repo,
 			current: Arc::new(Mutex::new(Request(0, None))),
 			last: Arc::new(Mutex::new(None)),
 			sender: sender.clone(),
@@ -48,9 +55,7 @@ impl AsyncBlame {
 	}
 
 	///
-	pub fn last(
-		&mut self,
-	) -> Result<Option<(BlameParams, FileBlame)>> {
+	pub fn last(&self) -> Result<Option<(BlameParams, FileBlame)>> {
 		let last = self.last.lock()?;
 
 		Ok(last.clone().map(|last_result| {
@@ -59,7 +64,7 @@ impl AsyncBlame {
 	}
 
 	///
-	pub fn refresh(&mut self) -> Result<()> {
+	pub fn refresh(&self) -> Result<()> {
 		if let Ok(Some(param)) = self.get_last_param() {
 			self.clear_current()?;
 			self.request(param)?;
@@ -74,7 +79,7 @@ impl AsyncBlame {
 
 	///
 	pub fn request(
-		&mut self,
+		&self,
 		params: BlameParams,
 	) -> Result<Option<FileBlame>> {
 		log::trace!("request");
@@ -96,11 +101,13 @@ impl AsyncBlame {
 		let arc_last = Arc::clone(&self.last);
 		let sender = self.sender.clone();
 		let arc_pending = Arc::clone(&self.pending);
+		let repo = self.repo.clone();
 
 		self.pending.fetch_add(1, Ordering::Relaxed);
 
 		rayon_core::spawn(move || {
 			let notify = Self::get_blame_helper(
+				&repo,
 				params,
 				&arc_last,
 				&arc_current,
@@ -130,6 +137,7 @@ impl AsyncBlame {
 	}
 
 	fn get_blame_helper(
+		repo_path: &RepoPath,
 		params: BlameParams,
 		arc_last: &Arc<
 			Mutex<Option<LastResult<BlameParams, FileBlame>>>,
@@ -137,8 +145,11 @@ impl AsyncBlame {
 		arc_current: &Arc<Mutex<Request<u64, FileBlame>>>,
 		hash: u64,
 	) -> Result<bool> {
-		let file_blame =
-			sync::blame::blame_file(CWD, &params.file_path)?;
+		let file_blame = sync::blame::blame_file(
+			repo_path,
+			&params.file_path,
+			params.commit_id,
+		)?;
 
 		let mut notify = false;
 		{
@@ -168,7 +179,7 @@ impl AsyncBlame {
 			.map(|last_result| last_result.params))
 	}
 
-	fn clear_current(&mut self) -> Result<()> {
+	fn clear_current(&self) -> Result<()> {
 		let mut current = self.current.lock()?;
 		current.0 = 0;
 		current.1 = None;
